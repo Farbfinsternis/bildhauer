@@ -87,5 +87,11 @@
   "0040D090": "Triangle_SplitLongestEdge",
   "0040D190": "Edge_CanSplit",
   "0040F210": "Beautify_Pass",
-  "0040F600": "Beautify"
+  "0040F600": "Beautify",
+  "004060B0": "Mesh_UnhideAll",
+  "0040C810": "Mesh_UpdateGeometryAndNormals",
+  "0040CC30": "Mask_SetAll",
+  "0040CE80": "Job_ClearDirty",
+  "00411FF0": "Symmetry_SnapPlaneVertices",
+  "004582B0": "RunParallel"
 }

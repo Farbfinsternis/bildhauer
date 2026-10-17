@@ -1,4 +1,4 @@
-# Mesh core: data structure, dynamic tessellation, reduction
+# Mesh core: data structure, dynamic tessellation, reduction, subdivision
 
 Behavior description of Sculptris Alpha 6's mesh kernel, as the basis for an
 independent implementation. Addresses refer to `Sculptris.exe` (see
@@ -44,7 +44,8 @@ space ("ran out of … storage, allocate more"). **[sure]**
 
 | Offset | Field |
 |---|---|
-| +0x00 | `active`; +0x02 `dirty`; +0x05 split state (0 = no, 1 = yes, 2 = unchecked) |
+| +0x00 | `active`; +0x02 `dirty`; +0x04 quad diagonal (set by subdivision, see 6.3) **[likely]**; +0x05 split state (0 = no, 1 = yes, 2 = unchecked) |
+| +0x08 | slot index (temporary, set by subdivision) |
 | +0x0C, +0x10 | the (at most) 2 adjacent triangles; one 0 → boundary edge |
 | +0x18, +0x1C | endpoints A, B |
 | +0x24 | cached length \|B − A\| |
@@ -280,11 +281,98 @@ spreads over a few rings and then stops. Optionally multithreaded
 
 ---
 
-## 6. Open points
+## 6. Subdivision (`SubdivideMesh`, 0x40F8C0; "SUBDIVIDE ALL")
+
+Subdivision rebuilds the whole mesh: every edge gets a midpoint and every face
+is split into four. Original vertices stay where they are; it is an
+*interpolating* scheme without a smoothing step (no Loop or Catmull–Clark
+vertex rule). **[sure]**
+
+The caller saves an undo state first (`writemesh` into the undo ring),
+then calls `SubdivideMesh`. **[sure]**
+
+### 6.1 Edge midpoints **[sure]**
+
+Per active edge A–B:
+
+- Option **"Smooth subdivide (turn off to preserve corners)"** on (default):
+  the same curved midpoint as in edge splitting (section 2.1): cubic Bézier
+  from A to B with tangents projected into the vertex tangent planes,
+  control points at L/3, evaluated at t = 0.5. Only the position is computed;
+  no normal and no reference position.
+- Option off: the straight midpoint (A + B) / 2. The surface keeps its exact
+  shape, so corners and flat facets stay intact.
+- If A and B are both on the symmetry plane, the midpoint's x is set to 0.
+
+### 6.2 Topology **[sure]**
+
+The new mesh has V + E vertices: the old vertices (compacted, same order)
+followed by one midpoint per edge. Faces are generated per old face:
+
+**Triangle** (v0, v1, v2) with edge midpoints m0 = mid(v0,v1),
+m1 = mid(v1,v2), m2 = mid(v2,v0) gives 4 triangles:
+
+```
+(v0, m0, m2)   (m0, v1, m1)   (m1, v2, m2)   (m0, m1, m2)
+```
+
+**Quad** (only when the mesh has a polygon list, see sc1-format.md): two
+consecutive triangle slots marked 1 and 2 form the quad (v0, v1, v2, q), with
+T1 = (v0, v1, v2) and T2 = (v2, q, v0); the shared diagonal is v2–v0. With
+m0, m1 as above, n0 = mid(v2,q), n1 = mid(q,v0) and **c = midpoint of the
+diagonal** it gives 4 quads:
+
+```
+(v0, m0, c, n1)   (m0, v1, m1, c)   (m1, v2, n0, c)   (c, n0, q, n1)
+```
+
+The quad center is therefore not the average of the four corners but the
+(possibly curved) midpoint of the diagonal. A triangle marked 0 in a mesh
+with a polygon list is split as a triangle. A triangle marked 1 whose
+following slot is inactive is dropped (likely never happens).
+
+### 6.3 Rebuilding the mesh **[sure unless marked]**
+
+1. Deactivate all vertices, edges and triangles and reset the counters.
+2. Grow the arrays if needed: vertices to V + E, triangles to the new count,
+   edges to 4 · E (estimate).
+3. Create the vertices in order with `NewVertex`, so new index = slot.
+   `NewVertex` sets the reference position to the position. Subdivision
+   therefore resets the rest shape to the current shape.
+4. Create the faces with `AddTriangle` (no reference normal, so no
+   orientation flip). A quad (a, b, c, d) becomes the triangles (a, b, c) and
+   (c, d, a). Their shared edge c–a is marked as a quad diagonal
+   (edge +0x04 **[likely]**), and the new polygon list gets 1, 2 for the pair
+   and 0 for each plain triangle.
+5. Afterwards:
+   - unhide everything (`0x4060B0`) **[likely]**;
+   - rebuild the work sets with all active elements;
+   - with symmetry on: vertices with x = 0 get `onSymmetryPlane`, and
+     those vertices are snapped onto the plane (x of position, reference
+     position and both normals set to 0, normals renormalized; `0x411FF0`);
+   - update all triangle geometry and vertex normals (`0x40C810`);
+   - reset the dirty flags;
+   - **clear the mask**: every vertex gets weight 1 (`0x40CC30`).
+
+The new vertex count is V + E; with T plain triangles and Q quads the
+face count is 4 · (T + Q) (as triangles: 4 · T + 8 · Q). If the midpoint buffer overflows, Sculptris
+logs "sd_verts overflow" and exits.
+
+### 6.4 Notes for the implementation
+
+- No beautify or relaxation step runs after subdivision; every edge is
+  roughly halved.
+- In each step, edge midpoints only depend on the old mesh. The result
+  therefore does not depend on processing order.
+
+---
+
+## 7. Open points
 
 - Exact meaning of the brush parameters `+0xAC` (radius, confirmed by usage)
   and `+0xB0`, and of the call argument `s` in `TesselateForBrush`.
 - Symmetry correction 0x43BD90 for new vertices on the plane.
 - Summand X in the reduction threshold.
 - `AlignTriangle` (0x40C150): makes orientation consistent; details open.
-- `SubdivideMesh` (0x40F8C0), `SetSymmetry` (0x412170), brushes.
+- `SetSymmetry` (0x412170), brushes.
+- Subdivision: the job of `0x405E10` in the unhide step.
