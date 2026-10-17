@@ -46,6 +46,7 @@ function strAt(va) {
 }
 
 const lines = fs.readFileSync(asmPath, 'latin1').split(/\r?\n/);
+const names = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'names.json'), 'utf8'));
 const callTargets = new Set();
 for (const l of lines) {
   const m = /^\s+([0-9A-F]{8}): call\s+([0-9A-F]{8})$/.exec(l);
@@ -57,11 +58,12 @@ for (const l of lines) {
   const m = /^\s+([0-9A-F]{8}): (.*)$/.exec(l);
   if (!m) { out.push(l); continue; }
   const [, addr, ins] = m;
-  if (callTargets.has(addr)) out.push(`\nsub_${addr}:`);
+  if (callTargets.has(addr)) out.push(`\nsub_${addr}:${names[addr] ? '   ; ' + names[addr] : ''}`);
   const notes = [];
   for (const h of ins.match(/\b[0-9A-F]{6,8}h?\b/g) || []) {
     const va = parseInt(h, 16);
-    if (imports.has(va)) notes.push(imports.get(va));
+    if (names[h.replace(/h$/, '').padStart(8, '0')] && /call|jmp/.test(ins)) notes.push(names[h.replace(/h$/, '').padStart(8, '0')]);
+    else if (imports.has(va)) notes.push(imports.get(va));
     else { const s = strAt(va); if (s) notes.push(JSON.stringify(s)); }
   }
   out.push(`  ${addr}: ${ins}${notes.length ? '   ; ' + notes.join(' ') : ''}`);

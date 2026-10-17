@@ -22,12 +22,16 @@ read Sculptris' own file format is covered by interoperability
 re/
   docs/
     sc1-format.md     .sc1 file format (fully reconstructed, validated)
+    mesh-core.md      mesh data structure, edge split, brush tessellation, collapse, reduction, beautify
     function-map.md   functions in Sculptris.exe with their debug strings
   tools/
     sc1.js            .sc1 reader/writer, OBJ export (node tools/sc1.js)
     annotate.js       annotates dumpbin listings (strings, imports, labels)
     fileonly.js       strips undo memory-stream branches from readmesh/writemesh
     funcmap.js        generates docs/function-map.md
+    names.json        function names, shown by annotate.js
+    fn.js, clean.sh   print one function (clean.sh strips debug boilerplate)
+    const.js          read float constants from the EXE
   _work/              disassembly and intermediate results (local only)
 ```
 
@@ -45,9 +49,9 @@ node re/tools/funcmap.js re/_work/sculptris.ann.asm > re/docs/function-map.md
 | Area | Status | Key functions |
 |---|---|---|
 | `.sc1` format | done, round-trip byte-identical | `writemesh` 0x4419F0, `readmesh` 0x443912 |
-| Mesh data structure (vertex/edge/triangle stores) | open | `AddTriangle` 0x40B2A0, `VertexAddTriangle` 0x40A010 |
-| Dynamic tessellation (splitting edges under the brush) | open | `Tesselate` 0x40D220, `TesselateForBrush` 0x415000 |
-| Reduction (collapsing edges) | open | `CollapseEdge` 0x40E5F0, `ReduceMesh` 0x4105F0 |
+| Mesh data structure (vertex/edge/triangle stores) | documented | `AddTriangle` 0x40B2A0, `VertexAddTriangle` 0x40A010 |
+| Dynamic tessellation (splitting edges under the brush) | documented | `Tesselate` 0x40D220, `TesselateForBrush` 0x415000 |
+| Reduction (collapsing edges), beautify | documented | `CollapseEdge` 0x40E5F0, `ReduceMesh` 0x4105F0 |
 | Subdivision | open | `SubdivideMesh` 0x40F8C0 |
 | Symmetry | open | `SetSymmetry` 0x412170 |
 | Brushes (Draw, Crease, Flatten, Inflate, Pinch, Grab, Smooth) | open | brush UI 0x433700 |
