@@ -13,4 +13,9 @@ namespace bh {
 // added.
 bool mirrorHalf(const Mesh& half, Mesh& full);
 
+// Keeps the seam exact (symmetry.md 3): every dirty vertex on the symmetry
+// plane gets x = 0 for position and reference position, and normal.x = 0 for
+// both normals (renormalized).
+void snapPlaneVertices(Mesh& mesh);
+
 }  // namespace bh

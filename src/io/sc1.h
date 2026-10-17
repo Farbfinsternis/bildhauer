@@ -16,7 +16,7 @@ namespace bh {
 
 struct Sc1Vertex {
   Vec3 pos;
-  float weight = 1.0f;  // v >= 6: stored as round(weight * 255); older: f32
+  float weight = 1.0f;  // v >= 6: stored as round(weight * 255); older files: 1
   uint8_t flags = 0;    // bit 0: on the symmetry plane
 };
 

@@ -239,10 +239,11 @@ regions are protected (factor up to ~2400).
 
 Procedure:
 
-1. Statistics pass: minimum, mean and a weighted mean (weights cost³) of the
-   edge costs.
-2. Threshold `T = (strength × 0.7 + X) × weighted mean`, strength = global
-   0x4B08D8 (default 0.4, probably "Reduce strength") **[X open]**.
+1. Statistics pass ("edge_min, avglen, wavglen"): minimum, mean and a
+   weighted mean `W = Σ cost·w / Σ w` with weights `w = 1 / cost³`, so cheap
+   edges dominate.
+2. Threshold `T = (0.7 + 1.4 × k × strength) × W` (k as above), strength =
+   global 0x4B08D8 (default 0.4, probably "Reduce strength").
 3. For each vertex, try its edges in order; the first edge with `cost < T`
    is collapsed (`CollapseEdge`), then move on to the next vertex.
 4. If fewer than 20 collapses succeeded and pass < 3: repeat with the next
@@ -376,6 +377,5 @@ logs "sd_verts overflow" and exits.
 
 - How the brush parameters `+0xAC` (radius) and `+0xB0` (detail size) follow
   from the UI sliders (see [brushes.md](brushes.md)).
-- Summand X in the reduction threshold.
 - `AlignTriangle` (0x40C150): makes orientation consistent; details open.
 - Subdivision: the job of `0x405E10` in the unhide step.

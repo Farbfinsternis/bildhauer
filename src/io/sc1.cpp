@@ -101,7 +101,8 @@ bool readSc1(const std::vector<uint8_t>& data, Sc1File& out, std::string* error)
   out.vertices.resize(numVerts);
   for (Sc1Vertex& v : out.vertices) {
     v.pos = r.vec3();
-    v.weight = oldFormat ? r.f32() : r.u8() / 255.0f;
+    // The old f32 field is not a usable mask weight (0 in the samples).
+    v.weight = oldFormat ? (r.f32(), 1.0f) : r.u8() / 255.0f;
     v.flags = r.u8();
   }
   out.triangles.resize(numTris);
@@ -185,6 +186,7 @@ bool writeBinaryFile(const std::string& path, const std::vector<uint8_t>& data) 
 
 bool sc1ToMesh(const Sc1File& f, Mesh& mesh, std::string* error) {
   mesh = Mesh{};
+  mesh.symmetric = f.symmetry;
   for (const Sc1Vertex& v : f.vertices) {
     int i = mesh.addVertex(v.pos);
     Vertex& mv = mesh.vertex(i);
@@ -204,14 +206,19 @@ bool sc1ToMesh(const Sc1File& f, Mesh& mesh, std::string* error) {
   // T2 = (v2, q, v0), and the shared diagonal is T1's edge e2.
   if (f.hasPolyList) {
     size_t n = std::min(f.polyList.size(), f.triangles.size());
+    mesh.quadMarkers.assign(f.triangles.size(), 0);
     for (size_t i = 0; i + 1 < n; ++i) {
       if (f.polyList[i] != 1 || f.polyList[i + 1] != 2) continue;
       int diag = mesh.triangle(int(i)).e[2];
       const Edge& e = mesh.edge(diag);
-      if (e.tri[0] == int(i + 1) || e.tri[1] == int(i + 1)) mesh.edge(diag).quadDiagonal = true;
+      if (e.tri[0] != int(i + 1) && e.tri[1] != int(i + 1)) continue;
+      mesh.edge(diag).quadDiagonal = true;
+      mesh.quadMarkers[i] = 1;
+      mesh.quadMarkers[i + 1] = 2;
     }
   }
   mesh.updateGeometry();
+  mesh.storeReference();
   return true;
 }
 

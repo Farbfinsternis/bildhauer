@@ -12,7 +12,11 @@ endif()
 
 add_library(bildhauer_core
   src/core/mesh.cpp
+  src/core/reduce.cpp
+  src/core/relax.cpp
+  src/core/subdivide.cpp
   src/core/symmetry.cpp
+  src/core/tessellate.cpp
   src/io/sc1.cpp
 )
 target_include_directories(bildhauer_core PUBLIC src)
@@ -35,3 +39,7 @@ enable_testing()
 add_executable(sc1_test tests/sc1_test.cpp)
 target_link_libraries(sc1_test PRIVATE bildhauer_core)
 add_test(NAME sc1 COMMAND sc1_test ${BILDHAUER_SC1_SAMPLES})
+
+add_executable(ops_test tests/ops_test.cpp)
+target_link_libraries(ops_test PRIVATE bildhauer_core)
+add_test(NAME ops COMMAND ops_test ${BILDHAUER_SC1_SAMPLES})

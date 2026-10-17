@@ -69,9 +69,14 @@ class Mesh {
 
   int findEdge(int a, int b) const;
 
+  // Deactivates a vertex that no longer has triangles or edges.
+  bool removeIsolatedVertex(int v);
+
   // Face normals, centroids, radius, size; then vertex normals as the
-  // normalized, unweighted sum of the adjacent face normals.
+  // normalized, unweighted sum of the adjacent face normals. With symmetric,
+  // plane vertices are snapped first and their normals get x = 0.
   void updateGeometry();
+  void updateTriangleGeometry(int t) { updateTriangle(triangles_[t]); }
 
   int vertexSlots() const { return int(vertices_.size()); }
   int edgeSlots() const { return int(edges_.size()); }
@@ -87,8 +92,22 @@ class Mesh {
   Triangle& triangle(int i) { return triangles_[i]; }
   const Triangle& triangle(int i) const { return triangles_[i]; }
 
+  // Reference state = current state (stroke start, Job_StoreReference).
+  void storeReference();
+
+  // Drops the quad pairing: markers and diagonal flags.
+  void clearQuads();
+
   // Checks all back references and limits; returns false with a message.
   bool validate(std::string* error) const;
+
+  // Polygon list: per triangle slot 0 = triangle, 1 = first and 2 = second
+  // triangle of a quad (slots t and t + 1). Empty = no quads.
+  std::vector<uint8_t> quadMarkers;
+
+  // Stored +x half of a symmetric mesh: updateGeometry keeps plane vertices
+  // on x = 0 with normal.x = 0 (symmetry.md 3).
+  bool symmetric = false;
 
  private:
   int newEdge(int a, int b);

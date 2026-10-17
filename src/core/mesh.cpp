@@ -125,6 +125,13 @@ void Mesh::removeVertex(int v) {
   --numVertices_;
 }
 
+bool Mesh::removeIsolatedVertex(int v) {
+  Vertex& vx = vertices_[v];
+  if (!vx.active || vx.numTris != 0 || vx.numEdges != 0) return false;
+  removeVertex(v);
+  return true;
+}
+
 void Mesh::removeTriangle(int ti, bool removeOrphans) {
   Triangle& t = triangles_[ti];
   if (!t.active) return;
@@ -163,14 +170,31 @@ void Mesh::updateTriangle(Triangle& t) {
 }
 
 void Mesh::updateGeometry() {
+  if (symmetric)
+    for (Vertex& v : vertices_)
+      if (v.active && v.onSymmetryPlane) v.pos.x = v.refPos.x = 0;
   for (Triangle& t : triangles_)
     if (t.active) updateTriangle(t);
   for (Vertex& v : vertices_) {
     if (!v.active) continue;
     Vec3 sum;
     for (int i = 0; i < v.numTris; ++i) sum += triangles_[v.tris[i]].normal;
+    if (symmetric && v.onSymmetryPlane) sum.x = 0;
     v.normal = normalize(sum);
   }
+}
+
+void Mesh::storeReference() {
+  for (Vertex& v : vertices_) {
+    if (!v.active) continue;
+    v.refPos = v.pos;
+    v.refNormal = v.normal;
+  }
+}
+
+void Mesh::clearQuads() {
+  quadMarkers.clear();
+  for (Edge& e : edges_) e.quadDiagonal = false;
 }
 
 bool Mesh::validate(std::string* error) const {

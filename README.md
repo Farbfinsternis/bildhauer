@@ -36,10 +36,13 @@ re/
     const.js          read float constants from the EXE
   _work/              disassembly and intermediate results (local only)
 src/                  implementation (C++20, OpenGL planned for the viewer)
-  core/               mesh kernel (mesh.h), symmetry (mirrorHalf)
+  core/               mesh kernel (mesh.h), edge split + brush tessellation
+                      (tessellate), collapse + reduction (reduce), relaxation +
+                      beautify (relax), subdivision, symmetry
   io/                 .sc1 reader/writer, mesh loading
 tests/
   sc1_test.cpp        validates io + mesh kernel against real .sc1 files
+  ops_test.cpp        runs every mesh operation and checks validity and topology
 ```
 
 ### Building and testing
@@ -94,5 +97,6 @@ Implementation:
 |---|---|
 | Mesh kernel (stores, add/remove triangle, normals, validation) | done (`src/core`), tested on all samples |
 | `.sc1` read/write, mesh loading, mirroring | done (`src/io`); v8 round trip byte-identical, v0 upgrades to v8 |
-| Edge split, tessellation, reduction, subdivision | next |
-| Brushes, picking, OpenGL viewer | open |
+| Edge split, brush tessellation, collapse, reduction, beautify, subdivision (incl. quads) | done (`src/core`); topology kept on all samples and a quad cube |
+| Symmetry switching with plane-valence reduction | open |
+| Brushes, picking, OpenGL viewer | next |

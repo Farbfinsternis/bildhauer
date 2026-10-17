@@ -32,4 +32,15 @@ bool mirrorHalf(const Mesh& half, Mesh& full) {
   return true;
 }
 
+void snapPlaneVertices(Mesh& mesh) {
+  for (int i = 0; i < mesh.vertexSlots(); ++i) {
+    Vertex& v = mesh.vertex(i);
+    if (!v.active || !v.dirty || !v.onSymmetryPlane) continue;
+    v.pos.x = v.refPos.x = 0;
+    v.normal.x = v.refNormal.x = 0;
+    v.normal = normalize(v.normal);
+    v.refNormal = normalize(v.refNormal);
+  }
+}
+
 }  // namespace bh

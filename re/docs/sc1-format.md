@@ -162,8 +162,9 @@ Limits from the log strings: at most 24 triangles/edges per vertex
 
 ## Open questions
 
-- Meaning of `weight` (vert+0x18; 1.0 in all v8 samples, 0.0 in the v0
-  sample), `extraA` and `extraVec`.
+- Meaning of `weight` in the old format (f32; 0.0 in the v0 sample). Taken
+  literally it would mask the whole mesh, so the bildhauer loader uses 1.0 for
+  files older than version 6. Also open: `extraA` and `extraVec`.
 - Semantics of the triangle flag and the polygon-list byte values (the reader
   treats 2 specially).
 - Exact scale of the bump heights (units per mesh unit) — needs a test file
