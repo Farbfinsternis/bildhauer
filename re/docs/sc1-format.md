@@ -6,7 +6,10 @@ Reconstructed from `Sculptris.exe` (Alpha 6, build 2015-04-21, MSVC 2008, x86):
 [`tools/sc1.js`](../tools/sc1.js).
 
 **Validation:** all four v8 sample files (`default_sphere`, `default_plane`,
-`figure`, `head`) are read to the last byte and written back byte-identical.
+`figure`, `head`) and a painted test file (default sphere with color paint
+and one matcap, `re/_work/models/test01.sc1`, local only) are read to the
+last byte and written back byte-identical. That covers the texturing block
+and the RLE encoder.
 The v0 file `snok.sc1` is read completely. After mirroring, every mesh is a
 closed, consistently oriented 2-manifold (each edge has exactly 2 triangles,
 Euler characteristic 2).
@@ -77,13 +80,16 @@ mirrored indices and reversed winding.
 
 ### Texturing block (paint mode)
 
-None of the bundled samples contain it. The layout is taken from code only,
-and the reader and writer agree on it.
+Verified against a painted file (26 patches, 721 texverts, 512x512 images,
+1 material).
 
 ```
 numPatches    i32      global 0x4BFF58, patch stride 0x1E0
 patch[numPatches]:
-  5 x f32[3]           patch+0x08, +0x28, +0x34, +0x40, +0x4C
+  uvOrigin    f32[3]   patch+0x08: (u, v, 0) of the patch in the texture
+  center      f32[3]   patch+0x28: 3D position (in mesh units)
+  axes        f32[3][3] patch+0x34, +0x40, +0x4C: projection frame
+                       (rows of a matrix; "arrange - invert matrices")
 
 numTexverts   i32      global 0x4B8D58, texvert stride 0x28
 texvert[numTexverts]:
@@ -101,7 +107,12 @@ per triangle (numTris):
   patch       u16      tri+0x48 (extVersion < 6: i32)
 
 color image:  w i32, h i32, then w*h x 32-bit pixels     buffer 0x4FD120
-bump image:   w i32, h i32, then w*h x 32-bit values     buffer 0x4B0AE8
+              bytes R, G, B, A (uploaded as GL_RGBA/GL_UNSIGNED_BYTE);
+              as a little-endian i32: 0xAABBGGRR. Unpainted = 0xff666666
+bump image:   w i32, h i32, then w*h x i32 heights       buffer 0x4B0AE8
+              neutral (flat) = 0x10000000 (2^28); higher/lower values raise or
+              lower the surface. "Flatten bump" blends toward it per pixel:
+              v += ((0x10000000 - v) * a) >> 8, with a in 0..256
               extVersion >= 4: pixels RLE-coded (elemSize 4)
               extVersion <  4: raw i32[w*h]
 
@@ -109,10 +120,12 @@ if extVersion >= 8:
   numMaterials i32     used slots out of 16 (slot table 0x5174B0, stride 0x288)
   material[numMaterials]:
     slot      i32      0..15
-    filename  char[256] matcap file name (slot+0x48)
+    filename  char[256] absolute path of the matcap image (slot+0x48),
+                       e.g. "F:\Grafik\Sculptris Alpha 6\materials/JG_Drink01.png"
     flags     u8[3]    slot+0x249, +0x24A, +0x24B
     w, h      i32, i32 slot+0x274, +0x278
     mask      w*h bytes, RLE-coded (elemSize 1)    slot+0x280
+              (with one material all 255: the material covers everything)
 ```
 
 Packed vector (`0x402A80` / `0x402B20`): each component `c` in [-1, 1] is
@@ -141,7 +154,7 @@ original state machine.
 | triangle | `0x4FD090` / `0x4FD05C` | 0x64 (100) | +0x00 active, +0x04 flag, +0x08 vertex* [3], +0x48 patch id, +0x4C texvert* [3] |
 | edge | count `0x4FD058` | ? | allocated as 2x vertex count on load |
 | texvert | `0x4FD12C` / `0x4B8D58` | 0x28 | +0x00 index, +0x04 u, +0x08 v, +0x10 vec3, +0x1C vertex* |
-| patch | `0x4FD10C` / `0x4BFF58` | 0x1E0 | 5 x vec3 from +0x08 |
+| patch | `0x4FD10C` / `0x4BFF58` | 0x1E0 | +0x08 uv origin, +0x28 center, +0x34..+0x57 axes |
 | material slot | `0x5174B0`, 16 entries | 0x288 | +0x48 name[256], +0x248 used, +0x274 w, +0x278 h, +0x280 mask* |
 
 Limits from the log strings: at most 24 triangles/edges per vertex
@@ -153,7 +166,8 @@ Limits from the log strings: at most 24 triangles/edges per vertex
   sample), `extraA` and `extraVec`.
 - Semantics of the triangle flag and the polygon-list byte values (the reader
   treats 2 specially).
-- Pixel format of the color image (RGBA order) and the bump values.
-- Meaning of the five vectors per patch (probably the patch's projection
-  frame).
-- An `.sc1` with paint data is still needed to verify the texturing block.
+- Exact scale of the bump heights (units per mesh unit) — needs a test file
+  with painted bump.
+- Meaning of the three material flag bytes (all 0 in the sample) and the gap
+  patch+0x14..+0x27.
+- How the axes and the patch center map 3D points into the patch's UV area.

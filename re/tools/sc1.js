@@ -141,8 +141,8 @@ function readTexturing(r, m, ev) {
     const w = r.i32(), h = r.i32();
     return { w, h, data: ev < 4 ? r.i32array(w * h) : r.rle(w * h, 4) };
   };
-  t.color = img();                     // globals 0x4B0B3C/0x4B0B40, buffer 0x4FD120
-  t.bump = img();                      // globals 0x4B0B00/0x4B0B04, buffer 0x4B0AE8
+  t.color = img();                     // RGBA bytes; globals 0x4B0B3C/0x4B0B40, buffer 0x4FD120
+  t.bump = img();                      // i32 heights, flat = 0x10000000; buffer 0x4B0AE8
   if (ev >= 8) {
     t.materials = [];                  // 16 slots of 0x288 bytes at 0x5174B0
     const n = r.i32();
