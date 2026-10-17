@@ -35,7 +35,28 @@ re/
     fn.js, clean.sh   print one function (clean.sh strips debug boilerplate)
     const.js          read float constants from the EXE
   _work/              disassembly and intermediate results (local only)
+src/                  implementation (C++20, OpenGL planned for the viewer)
+  core/               mesh kernel (mesh.h), symmetry (mirrorHalf)
+  io/                 .sc1 reader/writer, mesh loading
+tests/
+  sc1_test.cpp        validates io + mesh kernel against real .sc1 files
 ```
+
+### Building and testing
+
+Needs CMake ≥ 3.25, Ninja and MSVC; the VS Build Tools bring all three. From
+a shell where `vcvars64.bat` has run:
+
+```bat
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The test data is not part of the repository. By default the tests use the
+`.sc1` files from `BILDHAUER_SCULPTRIS_DIR` (`data/`, `models/`) and
+`re/_work/models/`. Pass other files with
+`-DBILDHAUER_SC1_SAMPLES="a.sc1;b.sc1"`.
 
 ### Rebuilding the analysis environment
 
@@ -66,3 +87,12 @@ an MCP server. Without a native engine it only covers engine-free PE checks
 | Paint mode (UV patches, color/bump baking) | open | "building texture mapping" |
 | Matcap rendering | open | `data/*.gls` (behavior only) |
 | `.sbm` format (`SBM-V12`) | open | |
+
+Implementation:
+
+| Area | Status |
+|---|---|
+| Mesh kernel (stores, add/remove triangle, normals, validation) | done (`src/core`), tested on all samples |
+| `.sc1` read/write, mesh loading, mirroring | done (`src/io`); v8 round trip byte-identical, v0 upgrades to v8 |
+| Edge split, tessellation, reduction, subdivision | next |
+| Brushes, picking, OpenGL viewer | open |
