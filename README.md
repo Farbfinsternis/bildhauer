@@ -46,6 +46,7 @@ tests/
   sc1_test.cpp        validates io + mesh kernel against real .sc1 files
   ops_test.cpp        runs every mesh operation and checks validity and topology
   brush_test.cpp      picking and all 11 brushes on real meshes
+  brush_bench.cpp     times strokes phase by phase (not a test; brush_bench <file.sc1>)
 ```
 
 ### Building and testing

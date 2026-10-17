@@ -35,9 +35,9 @@ int Mesh::addVertex(const Vec3& pos) {
   int i = takeSlot(vertices_, freeVertices_);
   Vertex& v = vertices_[i];
   v.active = true;
-  v.dirty = true;
   v.pos = v.refPos = pos;
   ++numVertices_;
+  setDirty(i);
   return i;
 }
 
@@ -98,7 +98,7 @@ int Mesh::addTriangle(int a, int b, int c, const Vec3* orientHint) {
   for (int k = 0; k < 3; ++k) {
     Vertex& v = vertices_[vs[k]];
     v.tris[v.numTris++] = ti;
-    v.dirty = true;
+    setDirty(vs[k]);
   }
   for (int k = 0; k < 3; ++k) {
     int e = existing[k] >= 0 ? existing[k] : newEdge(vs[k], vs[(k + 1) % 3]);
@@ -137,7 +137,7 @@ void Mesh::removeTriangle(int ti, bool removeOrphans) {
   if (!t.active) return;
   for (int v : t.v) {
     removeFrom(vertices_[v].tris, vertices_[v].numTris, ti);
-    vertices_[v].dirty = true;
+    setDirty(v);
   }
   for (int e : t.e) {
     Edge& edge = edges_[e];
@@ -181,6 +181,56 @@ void Mesh::updateGeometry() {
     for (int i = 0; i < v.numTris; ++i) sum += triangles_[v.tris[i]].normal;
     if (symmetric && v.onSymmetryPlane) sum.x = 0;
     v.normal = normalize(sum);
+  }
+}
+
+void Mesh::setDirty(int v) {
+  Vertex& vx = vertices_[v];
+  if (vx.dirty) return;
+  vx.dirty = true;
+  dirtyVertices.push_back(v);
+}
+
+void Mesh::clearDirty() {
+  for (int v : dirtyVertices) vertices_[v].dirty = false;
+  dirtyVertices.clear();
+}
+
+void Mesh::updateGeometryAround(const std::vector<int>& verts) {
+  if (++stamp_ == 0) {  // wrapped: reset the scratch
+    std::fill(triStamp_.begin(), triStamp_.end(), 0);
+    std::fill(vertStamp_.begin(), vertStamp_.end(), 0);
+    stamp_ = 1;
+  }
+  triStamp_.resize(triangles_.size(), 0);
+  vertStamp_.resize(vertices_.size(), 0);
+  std::vector<int> normals;
+  for (int v : verts) {
+    Vertex& vx = vertices_[v];
+    if (!vx.active) continue;
+    if (symmetric && vx.onSymmetryPlane) vx.pos.x = vx.refPos.x = 0;
+  }
+  for (int v : verts) {
+    const Vertex& vx = vertices_[v];
+    if (!vx.active) continue;
+    for (int i = 0; i < vx.numTris; ++i) {
+      int t = vx.tris[i];
+      if (triStamp_[t] == stamp_) continue;
+      triStamp_[t] = stamp_;
+      updateTriangle(triangles_[t]);
+      for (int w : triangles_[t].v)
+        if (vertStamp_[w] != stamp_) {
+          vertStamp_[w] = stamp_;
+          normals.push_back(w);
+        }
+    }
+  }
+  for (int v : normals) {
+    Vertex& vx = vertices_[v];
+    Vec3 sum;
+    for (int i = 0; i < vx.numTris; ++i) sum += triangles_[vx.tris[i]].normal;
+    if (symmetric && vx.onSymmetryPlane) sum.x = 0;
+    vx.normal = normalize(sum);
   }
 }
 

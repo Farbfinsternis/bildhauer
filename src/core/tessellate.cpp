@@ -1,5 +1,7 @@
 #include "core/tessellate.h"
 
+#include <algorithm>
+#include <queue>
 #include <vector>
 
 #include "core/curve.h"
@@ -44,7 +46,6 @@ int splitEdge(Mesh& mesh, int e) {
   mv.hidden = a.hidden || b.hidden;
   mv.onSymmetryPlane = a.onSymmetryPlane && b.onSymmetryPlane;
   mv.relaxCountdown = 5;
-  mv.dirty = true;
 
   // Per adjacent triangle (x0, x1, x2) with the edge as (xk, xk+1) and the
   // opposite vertex o: (xk, M, o) and (M, xk+1, o).
@@ -68,7 +69,8 @@ int splitEdge(Mesh& mesh, int e) {
   return m;
 }
 
-int tessellateForBrush(Mesh& mesh, const BrushDetail& brush) {
+int tessellateForBrush(Mesh& mesh, const BrushDetail& brush, const std::vector<int>* regionVertices,
+                       std::vector<int>* newVertices) {
   if (brush.detailFactor <= 0.15f) return 0;
   const float threshold = brush.detailSize / (2 * brush.scale) / brush.detailFactor;
 
@@ -82,41 +84,63 @@ int tessellateForBrush(Mesh& mesh, const BrushDetail& brush) {
     }
     return editable && length(brush.center - tri.centroid) <= tri.radius + brush.radius;
   };
+  auto longestEdge = [&](int t) {
+    const Triangle& tri = mesh.triangle(t);
+    int longest = tri.e[0];
+    for (int e : tri.e)
+      if (mesh.edge(e).length > mesh.edge(longest).length) longest = e;
+    return longest;
+  };
 
-  std::vector<int> candidates;
-  for (int t = 0; t < mesh.triangleSlots(); ++t)
-    if (coarse(t)) candidates.push_back(t);
+  // Max-heap of (edge length, triangle, its longest edge). Entries go stale
+  // when their triangle is removed by a split; they are checked on pop.
+  struct Entry {
+    float length;
+    int tri, edge;
+    bool operator<(const Entry& o) const { return length < o.length; }
+  };
+  std::priority_queue<Entry> heap;
+  auto push = [&](int t) {
+    if (!coarse(t)) return;
+    int e = longestEdge(t);
+    heap.push({mesh.edge(e).length, t, e});
+  };
 
-  int splits = 0;
-  std::vector<char> seen;
-  while (splits < brush.maxSplits) {
-    int best = -1;
-    float bestLength = 0;
-    for (int t : candidates) {
-      const Triangle& tri = mesh.triangle(t);
-      int longest = tri.e[0];
-      for (int e : tri.e)
-        if (mesh.edge(e).length > mesh.edge(longest).length) longest = e;
-      if (mesh.edge(longest).length > bestLength && canSplitEdge(mesh, longest)) {
-        best = longest;
-        bestLength = mesh.edge(longest).length;
+  if (regionVertices) {
+    // Each triangle once, via a generation stamp that survives between calls.
+    static thread_local std::vector<uint32_t> stamp;
+    static thread_local uint32_t generation = 0;
+    if (++generation == 0) {
+      std::fill(stamp.begin(), stamp.end(), 0);
+      generation = 1;
+    }
+    stamp.resize(mesh.triangleSlots(), 0);
+    for (int v : *regionVertices) {
+      const Vertex& vx = mesh.vertex(v);
+      if (!vx.active) continue;
+      for (int i = 0; i < vx.numTris; ++i) {
+        int t = vx.tris[i];
+        if (stamp[t] == generation) continue;
+        stamp[t] = generation;
+        push(t);
       }
     }
-    if (best < 0) break;
-    int m = splitEdge(mesh, best);
+  } else {
+    for (int t = 0; t < mesh.triangleSlots(); ++t) push(t);
+  }
+
+  int splits = 0;
+  while (splits < brush.maxSplits && !heap.empty()) {
+    Entry top = heap.top();
+    heap.pop();
+    if (!coarse(top.tri) || longestEdge(top.tri) != top.edge || mesh.edge(top.edge).length != top.length) continue;
+    if (!canSplitEdge(mesh, top.edge)) continue;
+    int m = splitEdge(mesh, top.edge);
     if (m < 0) break;
     ++splits;
-
-    seen.assign(mesh.triangleSlots(), 0);
-    std::vector<int> next;
+    if (newVertices) newVertices->push_back(m);
     const Vertex& mv = mesh.vertex(m);
-    for (int i = 0; i < mv.numTris; ++i) {
-      int t = mv.tris[i];
-      if (coarse(t) && !seen[t]) { seen[t] = 1; next.push_back(t); }
-    }
-    for (int t : candidates)
-      if (t < mesh.triangleSlots() && coarse(t) && !seen[t]) { seen[t] = 1; next.push_back(t); }
-    candidates.swap(next);
+    for (int i = 0; i < mv.numTris; ++i) push(mv.tris[i]);
   }
   if (splits > 0) {
     if (brush.beautify) beautifyPass(mesh);

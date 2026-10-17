@@ -1,8 +1,9 @@
 // bildhauer viewer: Win32 + OpenGL 1.x, no other dependencies.
 //
 //   bildhauer [file.sc1]      (without a file: an icosphere)
-//   bildhauer [file.sc1] --snapshot out.png [--demo]
-//                             render one frame (after demo strokes) and exit
+//   bildhauer [file.sc1] --snapshot out.png [--demo] [--frames N]
+//                             render one frame (after demo strokes) and exit;
+//                             --frames also writes the mean frame time to out.png.txt
 //
 // Mouse: LMB sculpt (Ctrl inverts; with Mask: Ctrl unmasks), RMB or Alt+LMB
 // orbit, MMB pan, wheel zoom.
@@ -200,25 +201,33 @@ void loadView() {
   glLoadMatrixf(m);
 }
 
-// Draws the stored mesh, or its mirror image (x -> -x).
+// Draws the stored mesh, or its mirror image (x -> -x). Per-vertex arrays
+// indexed by vertex slot, plus an index list of the active triangles.
 void drawMesh(bool mirrored) {
   const Mesh& m = app.mesh;
   const Camera& c = app.camera;
   const Vec3 r = c.right(), u = c.up();
-  std::vector<float> pos, uv, col;
-  pos.reserve(size_t(m.numTriangles()) * 9);
+  static std::vector<float> pos, uv, col;
+  static std::vector<GLuint> idx;
+  const size_t n = size_t(m.vertexSlots());
+  pos.resize(n * 3);
+  uv.resize(n * 2);
+  col.resize(n * 3);
+  for (size_t i = 0; i < n; ++i) {
+    const Vertex& v = m.vertex(int(i));
+    if (!v.active) continue;
+    Vec3 p = v.pos, nr = v.normal;
+    if (mirrored) { p.x = -p.x; nr.x = -nr.x; }
+    pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
+    uv[i * 2] = 0.5f + 0.49f * dot(nr, r);
+    uv[i * 2 + 1] = 0.5f + 0.49f * dot(nr, u);
+    float shade = v.hidden ? 0.5f : 0.35f + 0.65f * v.weight;
+    col[i * 3] = shade; col[i * 3 + 1] = shade; col[i * 3 + 2] = v.weight < 1 ? shade * 0.8f : shade;
+  }
+  idx.clear();
   for (int t = 0; t < m.triangleSlots(); ++t) {
     const Triangle& tri = m.triangle(t);
-    if (!tri.active) continue;
-    for (int k = 0; k < 3; ++k) {
-      const Vertex& v = m.vertex(tri.v[k]);
-      Vec3 p = v.pos, n = v.normal;
-      if (mirrored) { p.x = -p.x; n.x = -n.x; }
-      pos.insert(pos.end(), {p.x, p.y, p.z});
-      uv.insert(uv.end(), {0.5f + 0.49f * dot(n, r), 0.5f + 0.49f * dot(n, u)});
-      float shade = v.hidden ? 0.5f : 0.35f + 0.65f * v.weight;
-      col.insert(col.end(), {shade, shade, v.weight < 1 ? shade * 0.8f : shade});
-    }
+    if (tri.active) idx.insert(idx.end(), {GLuint(tri.v[0]), GLuint(tri.v[1]), GLuint(tri.v[2])});
   }
   glEnableClientState(GL_VERTEX_ARRAY);
   glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -228,7 +237,7 @@ void drawMesh(bool mirrored) {
   glColorPointer(3, GL_FLOAT, 0, col.data());
   glFrontFace(mirrored ? GL_CW : GL_CCW);
   glEnable(GL_TEXTURE_2D);
-  glDrawArrays(GL_TRIANGLES, 0, GLsizei(pos.size() / 3));
+  glDrawElements(GL_TRIANGLES, GLsizei(idx.size()), GL_UNSIGNED_INT, idx.data());
   glDisable(GL_TEXTURE_2D);
   if (app.wireframe) {
     glDisableClientState(GL_COLOR_ARRAY);
@@ -236,7 +245,7 @@ void drawMesh(bool mirrored) {
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glEnable(GL_POLYGON_OFFSET_LINE);
     glPolygonOffset(-1, -1);
-    glDrawArrays(GL_TRIANGLES, 0, GLsizei(pos.size() / 3));
+    glDrawElements(GL_TRIANGLES, GLsizei(idx.size()), GL_UNSIGNED_INT, idx.data());
     glDisable(GL_POLYGON_OFFSET_LINE);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
   }
@@ -304,7 +313,7 @@ void render(bool present = true) {
 
 // --- input -------------------------------------------------------------------
 
-StrokeInput inputAt(int mx, int my) {
+StrokeInput inputAt(int mx, int my, PickHit* hitOut = nullptr) {
   const Camera& c = app.camera;
   float aspect = float(app.width) / float(std::max(app.height, 1));
   float x = (2.0f * mx / app.width - 1) * std::tan(kFov / 2) * aspect;
@@ -318,18 +327,15 @@ StrokeInput inputAt(int mx, int my) {
   in.mouseX = float(mx);
   in.mouseY = float(my);
   PickHit h = pick(app.mesh, in.rayOrigin, in.rayDir);
-  in.point = h.hit ? h.point : Vec3{};
+  in.point = h.point;
+  in.hit = h.hit;
+  if (hitOut) *hitOut = h;
   return in;
 }
 
-void updateHover(int mx, int my) {
-  StrokeInput in = inputAt(mx, my);
-  app.hover = pick(app.mesh, in.rayOrigin, in.rayDir);
-}
-
 void beginStroke(int mx, int my, bool invert) {
-  StrokeInput in = inputAt(mx, my);
-  PickHit h = pick(app.mesh, in.rayOrigin, in.rayDir);
+  PickHit h;
+  StrokeInput in = inputAt(mx, my, &h);
   if (!h.hit) return;
   pushUndo();
   BrushSettings s = app.brush;
@@ -421,12 +427,11 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       } else if (app.panning) {
         float scale = app.camera.distance * 2 * std::tan(kFov / 2) / float(app.height);
         app.camera.target += (app.camera.right() * float(-dx) + app.camera.up() * float(dy)) * scale;
-      } else if (app.stroke) {
-        app.stroke->moveTo(inputAt(x, y));
       }
+      StrokeInput in = inputAt(x, y, &app.hover);
+      if (app.stroke) app.stroke->moveTo(in);
       app.mouseX = x;
       app.mouseY = y;
-      updateHover(x, y);
       return 0;
     }
     case WM_MOUSEWHEEL:
@@ -539,9 +544,11 @@ void runDemo() {
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
   std::string modelPath, snapshot;
   bool demo = false;
+  int frames = 0;
   for (int i = 1; i < __argc; ++i) {
     std::string a = __argv[i];
     if (a == "--snapshot" && i + 1 < __argc) snapshot = __argv[++i];
+    else if (a == "--frames" && i + 1 < __argc) frames = std::atoi(__argv[++i]);
     else if (a == "--demo") demo = true;
     else modelPath = a;
   }
@@ -562,6 +569,19 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     app.width = rc.right;
     app.height = rc.bottom;
     if (demo) runDemo();
+    if (frames > 0) {  // average frame time, written next to the snapshot
+      LARGE_INTEGER f, t0, t1;
+      QueryPerformanceFrequency(&f);
+      QueryPerformanceCounter(&t0);
+      for (int i = 0; i < frames; ++i) { render(false); glFinish(); }
+      QueryPerformanceCounter(&t1);
+      double ms = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart) / frames;
+      FILE* out = std::fopen((snapshot + ".txt").c_str(), "w");
+      if (out) {
+        std::fprintf(out, "%d triangles, %.2f ms per frame\n", app.mesh.numTriangles(), ms);
+        std::fclose(out);
+      }
+    }
     render(false);
     std::vector<unsigned char> px(size_t(app.width) * app.height * 3);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);

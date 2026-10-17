@@ -55,3 +55,7 @@ add_test(NAME ops COMMAND ops_test ${BILDHAUER_SC1_SAMPLES})
 add_executable(brush_test tests/brush_test.cpp)
 target_link_libraries(brush_test PRIVATE bildhauer_core)
 add_test(NAME brush COMMAND brush_test ${BILDHAUER_SC1_SAMPLES})
+
+# Not a test: times strokes phase by phase (brush_bench <file.sc1>).
+add_executable(brush_bench tests/brush_bench.cpp)
+target_link_libraries(brush_bench PRIVATE bildhauer_core)

@@ -149,7 +149,7 @@ void testFile(const std::string& path) {
   {  // beautify on everything
     Mesh m = base;
     for (int v = 0; v < m.vertexSlots(); ++v)
-      if (m.vertex(v).active) { m.vertex(v).dirty = true; m.vertex(v).relaxCountdown = 3; }
+      if (m.vertex(v).active) { m.setDirty(v); m.vertex(v).relaxCountdown = 3; }
     int moved = 0;
     for (int i = 0; i < 4; ++i) moved += beautifyPass(m);
     std::printf("  beautify: %d moves\n", moved);

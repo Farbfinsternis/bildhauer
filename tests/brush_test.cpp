@@ -37,6 +37,7 @@ StrokeInput inputAt(const Mesh& m, const Camera& cam, const Vec3& target, float 
   PickHit h = pick(m, in.rayOrigin, in.rayDir);
   if (hit) *hit = h.hit;
   in.point = h.hit ? h.point : target;
+  in.hit = h.hit;
   return in;
 }
 

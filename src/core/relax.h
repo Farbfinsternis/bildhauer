@@ -26,8 +26,8 @@ void updateVertexNormal(Mesh& mesh, int v);
 // One beautify pass over dirty vertices with relaxCountdown > 0 that are not
 // on the boundary: relaxation weighted by flatness,
 // f = clamp((|mean neighbor normal| - 0.5) * 2.1, 0, 1)^2. Counts down,
-// spreads to neighbors, and updates geometry afterwards. Returns the number of
-// moved vertices.
+// spreads to neighbors, and updates the geometry around the moved vertices.
+// Only visits mesh.dirtyVertices. Returns the number of moved vertices.
 int beautifyPass(Mesh& mesh);
 
 }  // namespace bh

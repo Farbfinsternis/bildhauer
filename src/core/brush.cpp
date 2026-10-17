@@ -1,6 +1,7 @@
 #include "core/brush.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #include "core/reduce.h"
@@ -12,6 +13,13 @@ namespace bh {
 namespace {
 
 constexpr float kPi = 3.14159265f;
+
+double msSince(std::chrono::steady_clock::time_point& t) {
+  auto now = std::chrono::steady_clock::now();
+  double ms = std::chrono::duration<double, std::milli>(now - t).count();
+  t = now;
+  return ms;
+}
 
 float smoothFalloff(float x) {
   if (x <= 0) return 0;
@@ -49,6 +57,27 @@ Stroke::Stroke(Mesh& mesh, const BrushSettings& settings, const StrokeInput& sta
 
 float Stroke::weight(int v) const { return s_.respectMask ? mesh_.vertex(v).weight : 1.0f; }
 
+void Stroke::updateRegion(const Vec3& c) {
+  const bool transformTool = s_.tool == Tool::Grab || s_.tool == Tool::Rotate || s_.tool == Tool::Scale;
+  const float reach = 1.6f * s_.radius;
+  const bool all = transformTool && s_.global;
+  if (!all && regionValid_ && length(c - regionCenter_) + reach <= regionRadius_) return;
+  regionCenter_ = c;
+  regionRadius_ = 2 * reach;
+  regionValid_ = !all;
+  region_.clear();
+  inRegion_.assign(mesh_.vertexSlots(), 0);
+  const Vec3 cm = mirrorX(c);
+  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+    const Vertex& vx = mesh_.vertex(v);
+    if (!vx.active) continue;
+    if (all || length(vx.pos - c) < regionRadius_ || (mesh_.symmetric && length(vx.pos - cm) < regionRadius_)) {
+      region_.push_back(v);
+      inRegion_[v] = 1;
+    }
+  }
+}
+
 Vec3 Stroke::dragPoint(const StrokeInput& in) const {
   // Pointer ray against the view plane through the anchor.
   float denom = dot(in.rayDir, in.viewDir);
@@ -62,6 +91,7 @@ void Stroke::moveTo(const StrokeInput& in) {
     dab(dragPoint(in), in);
     return;
   }
+  if (!in.hit) return;  // off the model: wait until the pointer is back
   // Walk from the previous point to the new one; dab every `spacing`.
   Vec3 from = lastPoint_, to = in.point;
   float dist = length(to - from);
@@ -80,17 +110,25 @@ void Stroke::moveTo(const StrokeInput& in) {
 void Stroke::dab(Vec3 c, const StrokeInput& in) {
   if (mesh_.symmetric && c.x < 0) c.x = -c.x;
   ++dabs_;
+  auto clock = std::chrono::steady_clock::now();
+  const auto dabStart = clock;
   const Tool tool = s_.tool;
   const bool transformTool = tool == Tool::Grab || tool == Tool::Rotate || tool == Tool::Scale;
+  updateRegion(c);
   if (tool != Tool::Smooth && tool != Tool::Reduce && !(transformTool && s_.global)) {
     BrushDetail detail;
     detail.center = c;
     detail.radius = s_.radius;
     detail.detailSize = s_.detailSize;
     detail.detailFactor = s_.detailFactor;
-    detail.beautify = s_.beautify;
-    tessellateForBrush(mesh_, detail);
+    detail.beautify = false;  // runs once after the tool
+    std::vector<int> created;
+    tessellateForBrush(mesh_, detail, &region_, &created);
+    inRegion_.resize(mesh_.vertexSlots(), 0);
+    for (int v : created)
+      if (!inRegion_[v]) { inRegion_[v] = 1; region_.push_back(v); }
   }
+  times_.tessellate += msSince(clock);
   auto mirrorFor = [&](float r) { return mesh_.symmetric && c.x < r; };
   switch (tool) {
     case Tool::Draw: draw(c, mirrorFor(s_.radius)); break;
@@ -105,8 +143,13 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
     case Tool::Scale: transform(in); break;
     case Tool::Reduce: reduce(c); break;
   }
-  mesh_.updateGeometry();
+  times_.tool += msSince(clock);
+  mesh_.updateGeometryAround(mesh_.dirtyVertices);
+  times_.geometry += msSince(clock);
   if (s_.beautify) beautifyPass(mesh_);
+  times_.beautify += msSince(clock);
+  auto start = dabStart;
+  times_.worstDab = std::max(times_.worstDab, msSince(start));
 }
 
 void Stroke::draw(const Vec3& c, bool mirror) {
@@ -114,7 +157,7 @@ void Stroke::draw(const Vec3& c, bool mirror) {
   const Vec3 cm = mirrorX(c);
   Vec3 sumN, sumR;
   float sumA = 0;
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     const Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     float d = length(vx.pos - c);
@@ -150,7 +193,7 @@ void Stroke::draw(const Vec3& c, bool mirror) {
   const float sign = s >= 0 ? 1.0f : -1.0f;
   const float comp = mirror && s_.compensateSymmetry ? 1 - 0.5f * (r - c.x) / r : 1.0f;
 
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     const Vec3 p = vx.pos;
@@ -176,7 +219,7 @@ void Stroke::draw(const Vec3& c, bool mirror) {
 void Stroke::smooth(const Vec3& c) {
   const float r = s_.radius, s = std::fabs(s_.strength);
   for (int iteration = 0; iteration < 2; ++iteration) {
-    for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+    for (int v : region_) {
       Vertex& vx = mesh_.vertex(v);
       if (!usable(vx)) continue;
       float t = 1 - 1.3f * length(vx.pos - c) / r;
@@ -206,7 +249,7 @@ void Stroke::inflate(const Vec3& c, bool mirror) {
   const float r = 1.5f * s_.radius, s = s_.strength;
   const Vec3 cm = mirrorX(c);
   const float comp = mirror && s_.compensateSymmetry ? 1 - 0.5f * (r - c.x) / r : 1.0f;
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     bool moved = false;
@@ -227,7 +270,7 @@ void Stroke::pinch(const Vec3& c, bool mirror) {
   const float r = 1.5f * s_.radius, s = s_.strength;
   const Vec3 cm = mirrorX(c);
   float sum = 0;
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     const Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     float d = length(vx.pos - c);
@@ -238,7 +281,7 @@ void Stroke::pinch(const Vec3& c, bool mirror) {
     }
   }
   if (sum <= 0.01f) return;
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     float t = 1 - 1.3f * length(vx.pos - c) / r;
@@ -253,7 +296,7 @@ void Stroke::crease(const Vec3& c, bool mirror) {
   const Vec3 cm = mirrorX(c);
   Vec3 sumN, sumR;
   float sumA = 0;
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     const Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     float d = length(vx.pos - c);
@@ -278,7 +321,7 @@ void Stroke::crease(const Vec3& c, bool mirror) {
   const float sp = s >= 0 ? s : -std::sqrt(-s) * 1.4f;
   const float r2 = 1.6f * r;
   const Vec3 goal = R - N * (r2 / 6 * sp);
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     float t = 1 - 1.3f * length(vx.pos - c) / r2;
@@ -298,7 +341,7 @@ void Stroke::flatten(const Vec3& c, bool mirror, const Vec3& viewDir) {
     const Vec3 toEye = -viewDir;
     Vec3 sumN, sumP;
     float sumA = 0;
-    for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+    for (int v : region_) {
       const Vertex& vx = mesh_.vertex(v);
       if (!usable(vx)) continue;
       float d = length(vx.pos - c);
@@ -324,7 +367,7 @@ void Stroke::flatten(const Vec3& c, bool mirror, const Vec3& viewDir) {
     planeP_ = sumP / sumA;
     planeLocked_ = true;
   }
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     float t = 1 - 1.3f * length(vx.pos - c) / r;
@@ -353,7 +396,7 @@ void Stroke::mask(const Vec3& c) {
   const float r = s_.radius, s = s_.strength;
   const float k = std::pow(std::fabs(s), 1.5f);
   const float target = s > 0 ? 1.1f : -0.1f;
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     float t = 1 - 1.3f * length(vx.pos - c) / r;
@@ -369,13 +412,13 @@ void Stroke::grab(const Vec3& c) {
   const float r = 1.5f * s_.radius;
   Vec3 delta = c - anchor_;
   if (s_.global) {
-    for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+    for (int v : region_) {
       Vertex& vx = mesh_.vertex(v);
       if (!usable(vx) || vx.weight == 0) continue;
       Vec3 d = delta;
       if (vx.onSymmetryPlane) d.x = 0;
       vx.pos = vx.refPos + d;
-      vx.dirty = true;
+      mesh_.setDirty(v);
     }
     return;
   }
@@ -384,7 +427,7 @@ void Stroke::grab(const Vec3& c) {
     if (l > 0) delta = delta / l * (r * std::atan(l / r));
   }
   const float k = std::min(1.0f, (1.2f * std::fabs(s_.strength)) * (1.2f * std::fabs(s_.strength)));
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     Vec3 d = delta;
@@ -420,7 +463,7 @@ void Stroke::transform(const StrokeInput& in) {
     Vec3 axis = fwd;
     return anchor_ + q * ca + cross(axis, q) * sa + axis * (dot(axis, q) * (1 - ca));
   };
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+  for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx) || weight(v) == 0) continue;
     float f = 1;
@@ -432,7 +475,7 @@ void Stroke::transform(const StrokeInput& in) {
     Vec3 target = apply(vx.refPos);
     vx.pos = vx.refPos + (target - vx.refPos) * f;
     if (vx.onSymmetryPlane) vx.pos.x = 0;
-    vx.dirty = true;
+    mesh_.setDirty(v);
     if (!s_.global) touched(mesh_, v);
   }
 }
@@ -446,15 +489,19 @@ void Stroke::reduce(const Vec3& c) {
     detail.detailSize = s_.detailSize;
     detail.detailFactor = s_.detailFactor;
     detail.scale = std::fabs(s);
-    detail.beautify = s_.beautify;
-    tessellateForBrush(mesh_, detail);
+    detail.beautify = false;
+    std::vector<int> created;
+    tessellateForBrush(mesh_, detail, &region_, &created);
+    inRegion_.resize(mesh_.vertexSlots(), 0);
+    for (int v : created)
+      if (!inRegion_[v]) { inRegion_[v] = 1; region_.push_back(v); }
     return;
   }
   // Phase 1 finds the cheapest edge cost under the brush on the first dab,
   // phase 2 collapses edges cheaper than the adaptive threshold.
   for (int phase = dabs_ == 1 ? 1 : 2; phase <= 2; ++phase) {
     const float threshold = (0.8f * s + 1) * reduceMin_;
-    for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+    for (int v : region_) {
       const Vertex& vx = mesh_.vertex(v);
       if (!usable(vx) || vx.weight == 0 || length(vx.pos - c) >= r) continue;
       for (int i = 0; i < vx.numEdges; ++i) {

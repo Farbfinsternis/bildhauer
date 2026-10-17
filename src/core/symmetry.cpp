@@ -33,7 +33,7 @@ bool mirrorHalf(const Mesh& half, Mesh& full) {
 }
 
 void snapPlaneVertices(Mesh& mesh) {
-  for (int i = 0; i < mesh.vertexSlots(); ++i) {
+  for (int i : mesh.dirtyVertices) {
     Vertex& v = mesh.vertex(i);
     if (!v.active || !v.dirty || !v.onSymmetryPlane) continue;
     v.pos.x = v.refPos.x = 0;

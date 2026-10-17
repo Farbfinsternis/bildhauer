@@ -87,11 +87,10 @@ void subdivide(Mesh& mesh, const SubdivideSettings& s) {
   if (quads) out.quadMarkers = std::move(markers);
 
   out.updateGeometry();
-  for (int v = 0; v < out.vertexSlots(); ++v) out.vertex(v).dirty = true;
-  if (s.symmetry) snapPlaneVertices(out);
+  if (s.symmetry) snapPlaneVertices(out);  // every new vertex is dirty
   out.updateGeometry();
   out.storeReference();
-  for (int v = 0; v < out.vertexSlots(); ++v) out.vertex(v).dirty = false;
+  out.clearDirty();
   mesh = std::move(out);
 }
 

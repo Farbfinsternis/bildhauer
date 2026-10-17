@@ -12,13 +12,14 @@ bool isBoundaryVertex(const Mesh& mesh, int v) {
 }
 
 void markDirty(Mesh& mesh, int v) {
-  Vertex& vx = mesh.vertex(v);
-  vx.dirty = true;
+  mesh.setDirty(v);
+  const Vertex& vx = mesh.vertex(v);
   int spread = vx.relaxCountdown - 2;
   for (int i = 0; i < vx.numEdges; ++i) {
-    Vertex& n = mesh.vertex(mesh.edge(vx.edges[i]).other(v));
-    n.dirty = true;
-    if (spread > n.relaxCountdown) n.relaxCountdown = uint8_t(spread);
+    int n = mesh.edge(vx.edges[i]).other(v);
+    mesh.setDirty(n);
+    Vertex& nv = mesh.vertex(n);
+    if (spread > nv.relaxCountdown) nv.relaxCountdown = uint8_t(spread);
   }
 }
 
@@ -49,14 +50,19 @@ void updateVertexNormal(Mesh& mesh, int v) {
 }
 
 int beautifyPass(Mesh& mesh) {
-  int moved = 0;
-  for (int v = 0; v < mesh.vertexSlots(); ++v) {
+  // Works through the dirty list; vertices that stay dirty, and vertices
+  // dirtied during the pass, go to the fresh list.
+  std::vector<int> list;
+  list.swap(mesh.dirtyVertices);
+  std::vector<int> moved;
+  for (int v : list) {
     Vertex& vx = mesh.vertex(v);
     if (!vx.active || !vx.dirty) continue;
     if (vx.relaxCountdown == 0) {
       vx.dirty = false;
       continue;
     }
+    mesh.dirtyVertices.push_back(v);
     --vx.relaxCountdown;
     if (vx.hidden || isBoundaryVertex(mesh, v)) continue;
     Vec3 meanNormal;
@@ -68,10 +74,10 @@ int beautifyPass(Mesh& mesh) {
     if (f <= 0) continue;
     relaxTangential(mesh, v, f);
     markDirty(mesh, v);
-    ++moved;
+    moved.push_back(v);
   }
-  mesh.updateGeometry();
-  return moved;
+  mesh.updateGeometryAround(moved);
+  return int(moved.size());
 }
 
 }  // namespace bh

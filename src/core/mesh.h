@@ -78,6 +78,15 @@ class Mesh {
   void updateGeometry();
   void updateTriangleGeometry(int t) { updateTriangle(triangles_[t]); }
 
+  // Local version of updateGeometry: the triangles around the given vertices,
+  // then the normals of all vertices of those triangles.
+  void updateGeometryAround(const std::vector<int>& vertices);
+
+  // Marks a vertex dirty and records it in dirtyVertices (once).
+  void setDirty(int v);
+  // Clears every dirty flag and the list.
+  void clearDirty();
+
   int vertexSlots() const { return int(vertices_.size()); }
   int edgeSlots() const { return int(edges_.size()); }
   int triangleSlots() const { return int(triangles_.size()); }
@@ -109,6 +118,10 @@ class Mesh {
   // on x = 0 with normal.x = 0 (symmetry.md 3).
   bool symmetric = false;
 
+  // Vertices whose dirty flag is set, so passes need not scan every slot.
+  // May contain vertices that were deactivated since.
+  std::vector<int> dirtyVertices;
+
  private:
   int newEdge(int a, int b);
   void removeEdge(int e);
@@ -119,6 +132,8 @@ class Mesh {
   std::vector<Edge> edges_;
   std::vector<Triangle> triangles_;
   std::vector<int> freeVertices_, freeEdges_, freeTriangles_;
+  std::vector<uint32_t> triStamp_, vertStamp_;  // scratch for updateGeometryAround
+  uint32_t stamp_ = 0;
   int numVertices_ = 0, numEdges_ = 0, numTriangles_ = 0;
 };
 

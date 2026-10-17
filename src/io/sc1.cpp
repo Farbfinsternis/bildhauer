@@ -219,6 +219,7 @@ bool sc1ToMesh(const Sc1File& f, Mesh& mesh, std::string* error) {
   }
   mesh.updateGeometry();
   mesh.storeReference();
+  mesh.clearDirty();
   return true;
 }
 
