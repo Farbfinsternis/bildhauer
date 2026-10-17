@@ -35,6 +35,7 @@ space ("ran out of … storage, allocate more"). **[sure]**
 | +0x40 | reference normal **[likely]** |
 | +0x4C | up to 24 triangle pointers, count at +0xC8 |
 | +0xCC | up to 24 edge pointers, count at +0x12C |
+| +0x130 | mirror vertex (temporary, while turning symmetry off) |
 
 **Limit:** at most 24 edges per vertex ("Too many connections to a vertex
 (max 24)"). Operations that would raise the valence keep a safety margin of 18
@@ -121,8 +122,10 @@ reference normals (+0x40). **[sure]**
 Further attributes of the new vertex **[sure]**:
 - `weight` = mean of the endpoints
 - `hidden` = A.hidden OR B.hidden
-- `onSymmetryPlane` = A.onPlane AND B.onPlane (then an extra symmetry
-  correction runs, 0x43BD90, **[open]**)
+- `onSymmetryPlane` = A.onPlane AND B.onPlane. No extra correction runs;
+  the plane is kept exact by snapping after the normal update (see
+  [symmetry.md](symmetry.md)). The call to 0x43BD90 there is `render3D`
+  with argument 1, which only clears a render flag.
 
 ### 2.2 Topology **[sure]**
 
@@ -371,8 +374,7 @@ logs "sd_verts overflow" and exits.
 
 - Exact meaning of the brush parameters `+0xAC` (radius, confirmed by usage)
   and `+0xB0`, and of the call argument `s` in `TesselateForBrush`.
-- Symmetry correction 0x43BD90 for new vertices on the plane.
 - Summand X in the reduction threshold.
 - `AlignTriangle` (0x40C150): makes orientation consistent; details open.
-- `SetSymmetry` (0x412170), brushes.
+- Brushes.
 - Subdivision: the job of `0x405E10` in the unhide step.

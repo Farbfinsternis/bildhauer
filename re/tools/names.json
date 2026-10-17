@@ -91,7 +91,8 @@
   "004060B0": "Mesh_UnhideAll",
   "0040C810": "Mesh_UpdateGeometryAndNormals",
   "0040CC30": "Mask_SetAll",
-  "0040CE80": "Job_ClearDirty",
+  "0040CE80": "Job_SetDirtyFlags",
   "00411FF0": "Symmetry_SnapPlaneVertices",
-  "004582B0": "RunParallel"
+  "004582B0": "RunParallel",
+  "0043BD90": "render3D"
 }

@@ -23,6 +23,7 @@ re/
   docs/
     sc1-format.md     .sc1 file format (fully reconstructed, validated)
     mesh-core.md      mesh data structure, edge split, brush tessellation, collapse, reduction, beautify, subdivision
+    symmetry.md       mirror symmetry: half-mesh model, switching on/off, plane snapping
     function-map.md   functions in Sculptris.exe with their debug strings
   tools/
     sc1.js            .sc1 reader/writer, OBJ export (node tools/sc1.js)
@@ -58,7 +59,7 @@ an MCP server. Without a native engine it only covers engine-free PE checks
 | Dynamic tessellation (splitting edges under the brush) | documented | `Tesselate` 0x40D220, `TesselateForBrush` 0x415000 |
 | Reduction (collapsing edges), beautify | documented | `CollapseEdge` 0x40E5F0, `ReduceMesh` 0x4105F0 |
 | Subdivision (triangles and quads, smooth/flat) | documented | `SubdivideMesh` 0x40F8C0 |
-| Symmetry | open | `SetSymmetry` 0x412170 |
+| Symmetry (half mesh, on/off, seam) | documented; brush picking on the mirror side open | `SetSymmetry` 0x412170, `Symmetry_SnapPlaneVertices` 0x411FF0 |
 | Brushes (Draw, Crease, Flatten, Inflate, Pinch, Grab, Smooth) | open | brush UI 0x433700 |
 | Octree / picking | open | 0x404510, 0x41BA80 |
 | Paint mode (UV patches, color/bump baking) | open | "building texture mapping" |
