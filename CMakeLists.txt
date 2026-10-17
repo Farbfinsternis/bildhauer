@@ -11,7 +11,9 @@ if(MSVC)
 endif()
 
 add_library(bildhauer_core
+  src/core/brush.cpp
   src/core/mesh.cpp
+  src/core/pick.cpp
   src/core/reduce.cpp
   src/core/relax.cpp
   src/core/subdivide.cpp
@@ -20,6 +22,12 @@ add_library(bildhauer_core
   src/io/sc1.cpp
 )
 target_include_directories(bildhauer_core PUBLIC src)
+
+if(WIN32)
+  add_executable(bildhauer WIN32 src/app/main.cpp)
+  target_link_libraries(bildhauer PRIVATE bildhauer_core opengl32)
+  target_compile_definitions(bildhauer PRIVATE WIN32_LEAN_AND_MEAN)
+endif()
 
 # Tests run against .sc1 files that are not part of the repository (Sculptris
 # samples and local test files). Pass them via BILDHAUER_SC1_SAMPLES, or point
@@ -43,3 +51,7 @@ add_test(NAME sc1 COMMAND sc1_test ${BILDHAUER_SC1_SAMPLES})
 add_executable(ops_test tests/ops_test.cpp)
 target_link_libraries(ops_test PRIVATE bildhauer_core)
 add_test(NAME ops COMMAND ops_test ${BILDHAUER_SC1_SAMPLES})
+
+add_executable(brush_test tests/brush_test.cpp)
+target_link_libraries(brush_test PRIVATE bildhauer_core)
+add_test(NAME brush COMMAND brush_test ${BILDHAUER_SC1_SAMPLES})

@@ -52,4 +52,9 @@ bool writeBinaryFile(const std::string& path, const std::vector<uint8_t>& data);
 // diagonals from the polygon list are marked on the edges.
 bool sc1ToMesh(const Sc1File& file, Mesh& mesh, std::string* error);
 
+// Replaces the geometry in `file` with the mesh (active elements in slot
+// order). Extension values are kept; paint data is dropped, since it no
+// longer matches the topology.
+void meshToSc1(const Mesh& mesh, Sc1File& file);
+
 }  // namespace bh

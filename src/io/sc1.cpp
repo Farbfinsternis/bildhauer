@@ -222,4 +222,32 @@ bool sc1ToMesh(const Sc1File& f, Mesh& mesh, std::string* error) {
   return true;
 }
 
+void meshToSc1(const Mesh& mesh, Sc1File& f) {
+  f.version = 8;
+  f.symmetry = mesh.symmetric;
+  f.vertices.clear();
+  f.triangles.clear();
+  std::vector<int32_t> index(mesh.vertexSlots(), -1);
+  for (int v = 0; v < mesh.vertexSlots(); ++v) {
+    const Vertex& vx = mesh.vertex(v);
+    if (!vx.active) continue;
+    index[v] = int32_t(f.vertices.size());
+    f.vertices.push_back({vx.pos, vx.weight, uint8_t(vx.onSymmetryPlane ? 1 : 0)});
+  }
+  std::vector<uint8_t> polyList;
+  const bool quads = !mesh.quadMarkers.empty();
+  for (int t = 0; t < mesh.triangleSlots(); ++t) {
+    const Triangle& tri = mesh.triangle(t);
+    if (!tri.active) continue;
+    f.triangles.push_back({{index[tri.v[0]], index[tri.v[1]], index[tri.v[2]]}, uint8_t(tri.fileFlag ? 1 : 0)});
+    if (quads) polyList.push_back(t < int(mesh.quadMarkers.size()) ? mesh.quadMarkers[t] : 0);
+  }
+  f.hasExtension = true;
+  f.extVersion = 8;
+  f.hasPolyList = quads;
+  f.polyList = std::move(polyList);
+  f.hasTexturing = 0;
+  f.texturing.clear();
+}
+
 }  // namespace bh

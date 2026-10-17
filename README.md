@@ -35,14 +35,17 @@ re/
     fn.js, clean.sh   print one function (clean.sh strips debug boilerplate)
     const.js          read float constants from the EXE
   _work/              disassembly and intermediate results (local only)
-src/                  implementation (C++20, OpenGL planned for the viewer)
-  core/               mesh kernel (mesh.h), edge split + brush tessellation
+src/                  implementation (C++20, OpenGL)
+  app/                viewer (Win32 + OpenGL 1.x, no other dependencies)
+  core/               mesh kernel (mesh.h), brushes (brush), picking (pick),
+                      edge split + brush tessellation
                       (tessellate), collapse + reduction (reduce), relaxation +
                       beautify (relax), subdivision, symmetry
   io/                 .sc1 reader/writer, mesh loading
 tests/
   sc1_test.cpp        validates io + mesh kernel against real .sc1 files
   ops_test.cpp        runs every mesh operation and checks validity and topology
+  brush_test.cpp      picking and all 11 brushes on real meshes
 ```
 
 ### Building and testing
@@ -55,6 +58,21 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+### Running the viewer
+
+```bat
+buildildhauer.exe "F:GrafikSculptris Alpha 6modelshead.sc1"
+```
+
+Without a file it starts with an icosphere. Mouse: LMB sculpt (Ctrl inverts;
+with Mask, Ctrl unmasks), RMB or Alt+LMB orbit, MMB pan, wheel zoom. Keys as in
+Sculptris: D Draw, B Smooth, G Grab, C Inflate, F Flatten, V Pinch, M Mask,
+E Crease, R Rotate, T Scale, Y Reduce brush; pressing a tool key again toggles
+its option (Clay, Lock plane, Global). `[` `]` size, `-` `=` strength, W
+wireframe, Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+Z undo, Ctrl+S save as
+`<name>_bildhauer.sc1`. `--snapshot out.png [--demo]` renders one frame
+(after a few demo strokes) and exits.
 
 The test data is not part of the repository. By default the tests use the
 `.sc1` files from `BILDHAUER_SCULPTRIS_DIR` (`data/`, `models/`) and
@@ -98,5 +116,7 @@ Implementation:
 | Mesh kernel (stores, add/remove triangle, normals, validation) | done (`src/core`), tested on all samples |
 | `.sc1` read/write, mesh loading, mirroring | done (`src/io`); v8 round trip byte-identical, v0 upgrades to v8 |
 | Edge split, brush tessellation, collapse, reduction, beautify, subdivision (incl. quads) | done (`src/core`); topology kept on all samples and a quad cube |
+| Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
+| Viewer: matcap rendering, mirrored half, sculpting, undo, save | done (`src/app`), first version |
 | Symmetry switching with plane-valence reduction | open |
-| Brushes, picking, OpenGL viewer | next |
+| Paint mode, real matcaps, `.sbm` | open |
