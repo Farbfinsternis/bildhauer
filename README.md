@@ -24,6 +24,7 @@ re/
     sc1-format.md     .sc1 file format (fully reconstructed, validated)
     mesh-core.md      mesh data structure, edge split, brush tessellation, collapse, reduction, beautify, subdivision
     symmetry.md       mirror symmetry: half-mesh model, switching on/off, plane snapping
+    brushes.md        all 11 brushes, stroke/dab model, falloff, mask, picking
     function-map.md   functions in Sculptris.exe with their debug strings
   tools/
     sc1.js            .sc1 reader/writer, OBJ export (node tools/sc1.js)
@@ -60,8 +61,8 @@ an MCP server. Without a native engine it only covers engine-free PE checks
 | Reduction (collapsing edges), beautify | documented | `CollapseEdge` 0x40E5F0, `ReduceMesh` 0x4105F0 |
 | Subdivision (triangles and quads, smooth/flat) | documented | `SubdivideMesh` 0x40F8C0 |
 | Symmetry (half mesh, on/off, seam) | documented; brush picking on the mirror side open | `SetSymmetry` 0x412170, `Symmetry_SnapPlaneVertices` 0x411FF0 |
-| Brushes (Draw, Crease, Flatten, Inflate, Pinch, Grab, Smooth) | open | brush UI 0x433700 |
-| Octree / picking | open | 0x404510, 0x41BA80 |
+| Brushes (all 11 tools) | documented; slider mapping, Rotate/Scale details open | `Brush_Dispatch` 0x41A740 |
+| Picking (ray cast, spatial tree) | partly documented; tree maintenance open | `PickSurface` 0x408DB0, 0x41BA80 |
 | Paint mode (UV patches, color/bump baking) | open | "building texture mapping" |
 | Matcap rendering | open | `data/*.gls` (behavior only) |
 | `.sbm` format (`SBM-V12`) | open | |

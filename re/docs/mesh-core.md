@@ -159,8 +159,10 @@ Called per brush step, before the deformation. **[sure unless marked]**
 threshold = brush.detailSize / (2 * s) / G
 ```
 
-`brush.detailSize` (brush+0xB0) and `s` (call argument) come from the brush
-settings and view scale **[open: exact meaning]**. A triangle is "too
+`brush.detailSize` (brush+0xB0) comes from the brush settings and view scale
+**[open: exact mapping]**. `s` (call argument) is 1.0 for every brush, except
+the Reduce brush with negative strength, which passes `|strength|` (see
+[brushes.md](brushes.md)). A triangle is "too
 coarse" when `size = 3 × longest edge > threshold`.
 
 **Candidates:** visible triangles that are visible, not completely masked
@@ -372,9 +374,8 @@ logs "sd_verts overflow" and exits.
 
 ## 7. Open points
 
-- Exact meaning of the brush parameters `+0xAC` (radius, confirmed by usage)
-  and `+0xB0`, and of the call argument `s` in `TesselateForBrush`.
+- How the brush parameters `+0xAC` (radius) and `+0xB0` (detail size) follow
+  from the UI sliders (see [brushes.md](brushes.md)).
 - Summand X in the reduction threshold.
 - `AlignTriangle` (0x40C150): makes orientation consistent; details open.
-- Brushes.
 - Subdivision: the job of `0x405E10` in the unhide step.
