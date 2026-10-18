@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/mesh.h"
+#include "core/texmap.h"
 #include "core/vec3.h"
 
 namespace bh {
@@ -40,6 +41,43 @@ struct Sc1File {
   uint8_t hasTexturing = 0;
   std::vector<uint8_t> texturing;  // raw texturing block; layout depends on extVersion
 };
+
+// The texturing block (paint mode) decoded; sc1-format.md "Texturing block".
+struct Sc1Texturing {
+  struct Patch {
+    Vec3 uvOrigin, center;
+    std::array<Vec3, 3> axes;
+  };
+  struct TexVert {
+    float u = 0, v = 0;      // in [0, 1] of the texture
+    int32_t packedNormal = 0;
+    int32_t vertex = -1;
+  };
+  struct Image {
+    int32_t w = 0, h = 0;
+    std::vector<int32_t> pixels;  // color: 0xAABBGGRR; bump: heights, flat = 1 << 28
+  };
+  struct Material {
+    int32_t slot = 0;
+    std::array<char, 256> name{};
+    std::array<uint8_t, 3> flags{};  // colored, additive, hidden (sc1 slot +0x249..+0x24B)
+    int32_t w = 0, h = 0;
+    std::vector<uint8_t> mask;
+  };
+  std::vector<Patch> patches;
+  std::vector<TexVert> texverts;
+  std::vector<std::array<int32_t, 3>> triTexverts;  // per file triangle
+  std::vector<int32_t> triPatch;
+  Image color, bump;
+  std::vector<Material> materials;
+};
+
+// Decodes file.texturing (any extVersion). Fails on truncated data.
+bool decodeTexturing(const Sc1File& file, Sc1Texturing& out, std::string* error);
+
+// The stored UVs as a TextureMapping for a mesh built by sc1ToMesh (triangle
+// slot = file triangle; patch = chart).
+bool texturingToMapping(const Sc1Texturing& tex, const Mesh& mesh, TextureMapping& out, std::string* error);
 
 bool readSc1(const std::vector<uint8_t>& data, Sc1File& out, std::string* error);
 bool writeSc1(const Sc1File& file, std::vector<uint8_t>& out, std::string* error);

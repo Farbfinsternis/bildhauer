@@ -1,8 +1,10 @@
 #include "io/sc1.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <type_traits>
 
 namespace bh {
 
@@ -135,6 +137,118 @@ bool readSc1(const std::vector<uint8_t>& data, Sc1File& out, std::string* error)
   if (!r.ok()) return fail(error, "truncated extension block");
   if (out.hasTexturing) out.texturing = r.rest();
   else if (!r.eof()) return fail(error, std::to_string(r.remaining()) + " trailing bytes");
+  return true;
+}
+
+bool decodeTexturing(const Sc1File& f, Sc1Texturing& out, std::string* error) {
+  out = Sc1Texturing{};
+  if (!f.hasTexturing) return fail(error, "no texturing block");
+  Reader r(f.texturing);
+  const int ev = f.extVersion;
+  // ReadBufferRLE: literal and run segments alternate, each led by a u8
+  // count; a run repeats the last literal element.
+  auto rle = [&](auto& dst, size_t count, bool wide) {
+    dst.resize(count);
+    size_t i = 0;
+    int32_t last = 0;
+    bool literal = true;
+    while (i < count && r.ok() && !r.eof()) {
+      int n = r.u8();
+      for (int k = 0; k < n && i < count; ++k) {
+        if (literal) last = wide ? r.i32() : r.u8();
+        dst[i++] = static_cast<typename std::decay_t<decltype(dst)>::value_type>(last);
+      }
+      literal = !literal;
+    }
+    return i == count;
+  };
+
+  int32_t numPatches = r.i32();
+  if (numPatches < 0 || !r.has(size_t(numPatches) * 60)) return fail(error, "truncated patches");
+  out.patches.resize(numPatches);
+  for (auto& p : out.patches) {
+    p.uvOrigin = r.vec3();
+    p.center = r.vec3();
+    for (Vec3& a : p.axes) a = r.vec3();
+  }
+  int32_t numTexverts = r.i32();
+  if (numTexverts < 0 || !r.has(size_t(numTexverts) * (ev >= 6 ? 16 : 28))) return fail(error, "truncated texverts");
+  out.texverts.resize(numTexverts);
+  for (auto& tv : out.texverts) {
+    if (ev >= 6) {
+      tv.u = r.f32();
+      tv.v = r.f32();
+      tv.packedNormal = r.i32();
+    } else {
+      Vec3 uvw = r.vec3();
+      r.vec3();
+      tv.u = uvw.x;
+      tv.v = uvw.y;
+    }
+    tv.vertex = r.i32();
+  }
+  const size_t numTris = f.triangles.size();
+  out.triTexverts.resize(numTris);
+  out.triPatch.resize(numTris);
+  for (size_t t = 0; t < numTris; ++t) {
+    for (int32_t& i : out.triTexverts[t]) i = r.i32();
+    if (ev >= 6) {
+      uint8_t lo = r.u8(), hi = r.u8();
+      out.triPatch[t] = lo | (hi << 8);
+    } else {
+      out.triPatch[t] = r.i32();
+    }
+  }
+  for (Sc1Texturing::Image* im : {&out.color, &out.bump}) {
+    im->w = r.i32();
+    im->h = r.i32();
+    if (!r.ok() || im->w < 0 || im->h < 0 || int64_t(im->w) * im->h > (1 << 26)) return fail(error, "bad image size");
+    size_t n = size_t(im->w) * im->h;
+    if (ev < 4) {
+      im->pixels.resize(n);
+      for (int32_t& px : im->pixels) px = r.i32();
+    } else if (!rle(im->pixels, n, true)) {
+      return fail(error, "truncated image");
+    }
+  }
+  if (ev >= 8) {
+    int32_t numMaterials = r.i32();
+    if (numMaterials < 0 || numMaterials > 16) return fail(error, "bad material count");
+    out.materials.resize(numMaterials);
+    for (auto& m : out.materials) {
+      m.slot = r.i32();
+      for (char& c : m.name) c = char(r.u8());
+      for (uint8_t& b : m.flags) b = r.u8();
+      m.w = r.i32();
+      m.h = r.i32();
+      if (!r.ok() || m.w < 0 || m.h < 0 || int64_t(m.w) * m.h > (1 << 26)) return fail(error, "bad material mask size");
+      if (!rle(m.mask, size_t(m.w) * m.h, false)) return fail(error, "truncated material mask");
+    }
+  }
+  if (!r.ok()) return fail(error, "truncated texturing block");
+  for (size_t t = 0; t < numTris; ++t)
+    for (int32_t i : out.triTexverts[t])
+      if (i < 0 || i >= numTexverts) return fail(error, "triangle " + std::to_string(t) + " references texvert " + std::to_string(i));
+  for (const auto& tv : out.texverts)
+    if (tv.vertex < 0 || tv.vertex >= int32_t(f.vertices.size())) return fail(error, "texvert references a missing vertex");
+  return true;
+}
+
+bool texturingToMapping(const Sc1Texturing& tex, const Mesh& mesh, TextureMapping& out, std::string* error) {
+  out = TextureMapping{};
+  const int nt = int(tex.triTexverts.size());
+  if (nt > mesh.triangleSlots()) return fail(error, "texturing has more triangles than the mesh");
+  out.size = tex.color.w;
+  out.texverts.reserve(tex.texverts.size());
+  for (const auto& tv : tex.texverts) out.texverts.push_back({tv.u, tv.v, tv.vertex});
+  out.corners.assign(mesh.triangleSlots(), {-1, -1, -1});
+  out.chart.assign(mesh.triangleSlots(), -1);
+  for (int t = 0; t < nt; ++t) {
+    if (!mesh.triangle(t).active) continue;
+    for (int k = 0; k < 3; ++k) out.corners[t][k] = tex.triTexverts[t][k];
+    out.chart[t] = tex.triPatch[t];
+    out.numCharts = std::max(out.numCharts, tex.triPatch[t] + 1);
+  }
   return true;
 }
 

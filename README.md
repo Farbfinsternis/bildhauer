@@ -123,4 +123,5 @@ Implementation:
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
 | Viewer: matcap rendering, mirrored half, sculpting, undo, save | done (`src/app`), first version |
 | Symmetry switching with plane-valence reduction | open |
-| Paint mode, real matcaps and material layers | open |
+| Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
+| Paint mode: painting, bump normals, matcap shading, material layers | open |
