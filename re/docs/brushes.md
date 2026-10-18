@@ -241,8 +241,9 @@ radius is therefore `r/k`. Some use `sin(t·π/2)` or `t²` instead.
 
 - With "respect mask" on (default), every per-vertex factor is multiplied by
   `w`. A masked vertex (`w = 0`) does not move.
-- Each moved vertex gets `relaxCountdown = 10` and is marked dirty
-  (`Vertex_MarkDirty`), so the beautify pass relaxes the area afterwards.
+- Each moved vertex gets relax level 10 and is marked dirty
+  (`Vertex_MarkDirty`), so the per-frame beautify pass relaxes the area
+  (see [mesh-core.md](mesh-core.md) 5.2).
 
 ### 3.4 Brush mask (stencil) **[likely]**
 
@@ -501,7 +502,8 @@ Both work from `ref` with the falloff
   would grow without limit.
 - Every brush follows the same pattern: update region → tessellate →
   (optional plane/mean pass) → per-vertex move with falloff × mask × rate →
-  mark dirty. Normals and beautify follow afterwards.
+  mark dirty. Normals follow after each dab; beautify is not part of the
+  dab but runs once per frame from the main loop.
 - Effective radii differ per brush: Draw ≈ r/1.2, Smooth/Mask ≈ r/1.3,
   Inflate/Pinch/Flatten ≈ 1.5r/1.3, Grab ≈ 1.5r/1.1, Crease ≈ 1.6r/1.3.
 - **Weak spot at the symmetry line (observed in the bildhauer prototype,

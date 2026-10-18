@@ -9,6 +9,7 @@
 
 #include "core/brush.h"
 #include "core/pick.h"
+#include "core/relax.h"
 #include "io/sc1.h"
 #include "test_util.h"
 
@@ -50,7 +51,7 @@ int main(int argc, char** argv) {
       s.detailSize = s.radius * 0.5f;
       s.strength = 0.6f;
       int t0 = m.numTriangles();
-      double pickMs = 0;
+      double pickMs = 0, beautifyMs = 0;
       int picks = 0, misses = 0;
       float pathLength = 0;
       Vec3 last;
@@ -69,14 +70,17 @@ int main(int argc, char** argv) {
           haveLast = true;
         }
         stroke.moveTo(in);
+        auto b0 = std::chrono::steady_clock::now();  // one beautify pass per frame, as in the viewer
+        beautifyPass(m);
+        beautifyMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - b0).count();
       }
       double total = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
       const DabTimes& d = stroke.times();
       int n = std::max(1, stroke.dabCount());
       std::printf("%-7s r=%.3f  %3d dabs  tris %6d -> %6d  total %7.1f ms  per dab: tess %6.2f tool %6.2f geom %6.2f "
-                  "beaut %6.2f  worst %6.1f  pick %5.2f  path %.1f r, %d misses\n",
+                  "beautify/frame %6.2f  worst %6.1f  pick %5.2f  path %.1f r, %d misses\n",
                   toolName(tool), radiusFactor, stroke.dabCount(), t0, m.numTriangles(), total, d.tessellate / n,
-                  d.tool / n, d.geometry / n, d.beautify / n, d.worstDab, pickMs / picks, pathLength / s.radius, misses);
+                  d.tool / n, d.geometry / n, beautifyMs / picks, d.worstDab, pickMs / picks, pathLength / s.radius, misses);
     }
   }
   {  // the viewer copies the mesh for undo at every stroke start

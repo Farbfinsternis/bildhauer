@@ -34,6 +34,7 @@
 #include "core/mesh.h"
 #include "core/pick.h"
 #include "core/reduce.h"
+#include "core/relax.h"
 #include "core/subdivide.h"
 #include "io/sc1.h"
 
@@ -71,6 +72,7 @@ struct App {
   float sceneSize = 1;
 
   BrushSettings brush;
+  bool beautify = true;  // "Beautify/relax mesh (always used when adding detail)"
   std::array<ToolSliders, int(Tool::Reduce) + 1> sliders;
   std::unique_ptr<Stroke> stroke;
   std::deque<Mesh> undo;
@@ -117,6 +119,7 @@ void makeIcosphere(Mesh& m, int levels) {
   for (auto& tri : f) m.addTriangle(tri[0], tri[1], tri[2]);
   m.updateGeometry();
   m.storeReference();
+  m.clearDirty();
 }
 
 void frameModel() {
@@ -619,7 +622,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
       TranslateMessage(&msg);
       DispatchMessageA(&msg);
     }
+    // One beautify pass per frame while vertices are dirty (mesh-core.md 5.2);
+    // it keeps relaxing after the stroke until the mesh has settled.
+    bool relaxing = (app.beautify || app.brush.detailFactor > 0.15f) && !app.mesh.dirtyVertices.empty();
+    if (relaxing) beautifyPass(app.mesh);
     render();
-    if (!app.stroke) WaitMessage();  // idle until the next input
+    if (!app.stroke && !relaxing) WaitMessage();  // idle until the next input
   }
 }

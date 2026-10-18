@@ -50,8 +50,8 @@ vertex[numVerts]:
 
 triangle[numTris]:
   v           i32[3]   vertex indices (position in the vertex list above)
-  flag        u8       tri+0x04 (only version >= 7); if set, the three
-                       vertices get byte +0x07 = 1 on load (mask/hide state)
+  flag        u8       tri+0x04 (only version >= 7): triangle hidden; if set,
+                       the three vertices get +0x07 = 1 (hidden) on load
 
 -- end of file here => old file, no extensions, no paint data --
 
@@ -150,8 +150,8 @@ original state machine.
 
 | Structure | Global array / count | Stride | Known fields |
 |---|---|---|---|
-| vertex | `0x4FD088` / `0x4FD054` | 0x140 (320) | +0x00 active, +0x06 flags, +0x07 mask, +0x0C file index (temp), +0x18 weight f32, +0x1C pos, +0xC4 state |
-| triangle | `0x4FD090` / `0x4FD05C` | 0x64 (100) | +0x00 active, +0x04 flag, +0x08 vertex* [3], +0x48 patch id, +0x4C texvert* [3] |
+| vertex | `0x4FD088` / `0x4FD054` | 0x140 (320) | +0x00 active, +0x06 flags, +0x07 hidden, +0x0C file index (temp), +0x18 weight f32, +0x1C pos, +0xC4 state |
+| triangle | `0x4FD090` / `0x4FD05C` | 0x64 (100) | +0x00 active, +0x04 hidden, +0x08 vertex* [3], +0x48 patch id, +0x4C texvert* [3] |
 | edge | count `0x4FD058` | ? | allocated as 2x vertex count on load |
 | texvert | `0x4FD12C` / `0x4B8D58` | 0x28 | +0x00 index, +0x04 u, +0x08 v, +0x10 vec3, +0x1C vertex* |
 | patch | `0x4FD10C` / `0x4BFF58` | 0x1E0 | +0x08 uv origin, +0x28 center, +0x34..+0x57 axes |
@@ -165,8 +165,8 @@ Limits from the log strings: at most 24 triangles/edges per vertex
 - Meaning of `weight` in the old format (f32; 0.0 in the v0 sample). Taken
   literally it would mask the whole mesh, so the bildhauer loader uses 1.0 for
   files older than version 6. Also open: `extraA` and `extraVec`.
-- Semantics of the triangle flag and the polygon-list byte values (the reader
-  treats 2 specially).
+- The polygon-list byte values (the reader treats 2 specially). The
+  triangle flag is the hidden state (see mesh-core.md 1).
 - Exact scale of the bump heights (units per mesh unit) — needs a test file
   with painted bump.
 - Meaning of the three material flag bytes (all 0 in the sample) and the gap

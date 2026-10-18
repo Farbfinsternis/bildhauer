@@ -3,7 +3,8 @@
 // Sculpting brushes (re/docs/brushes.md). A Stroke stores the reference state
 // when it starts and turns pointer movement into dabs spaced along a smooth
 // path (brush_params.h); each dab tessellates under the brush, applies the
-// tool, and updates normals and beautify.
+// tool, and updates normals. Beautify is not part of a dab: like Sculptris,
+// the caller runs one beautifyPass per frame while vertices are dirty.
 //
 // Deviations from Sculptris where the docs leave things open: the work region
 // is a sphere around the dab (twice the brush reach) instead of a box, and
@@ -38,7 +39,6 @@ struct BrushSettings {
   bool global = false, limit = false, xyz = false;  // Grab, Rotate, Scale
   bool respectMask = true;
   bool compensateSymmetry = true;
-  bool beautify = true;
 };
 
 struct StrokeInput {
@@ -53,7 +53,7 @@ struct StrokeInput {
 
 // Time spent per dab phase, in milliseconds (summed over the stroke).
 struct DabTimes {
-  double tessellate = 0, tool = 0, geometry = 0, beautify = 0;
+  double tessellate = 0, tool = 0, geometry = 0;
   double worstDab = 0;
 };
 

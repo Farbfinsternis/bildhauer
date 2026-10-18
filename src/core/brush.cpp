@@ -173,7 +173,7 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
     detail.radius = s_.radius;
     detail.detailSize = s_.detailSize;
     detail.detailFactor = s_.detailFactor;
-    detail.beautify = false;  // runs once after the tool
+    detail.beautify = false;  // the caller runs beautify once per frame
     std::vector<int> created;
     tessellateForBrush(mesh_, detail, &region_, &created);
     inheritCoverage(created);
@@ -199,8 +199,6 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
   times_.tool += msSince(clock);
   mesh_.updateGeometryAround(mesh_.dirtyVertices);
   times_.geometry += msSince(clock);
-  if (s_.beautify) beautifyPass(mesh_);
-  times_.beautify += msSince(clock);
   auto start = dabStart;
   times_.worstDab = std::max(times_.worstDab, msSince(start));
 }

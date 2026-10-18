@@ -14,6 +14,7 @@
 #include "core/brush.h"
 #include "core/brush_params.h"
 #include "core/pick.h"
+#include "core/relax.h"
 #include "io/sc1.h"
 #include "test_util.h"
 
@@ -133,6 +134,15 @@ void testSymmetricStroke() {
     char what[96];
     std::snprintf(what, sizeof what, "step %.2f: ridge even across the plane (%.3f ... %.3f)", step, lo, hi);
     check(hi > 0 && lo > 0.85f * hi, what);
+
+    // The viewer runs one beautify pass per frame until nothing is dirty.
+    int frames = 0;
+    while (!mesh.dirtyVertices.empty() && frames < 1000) {
+      beautifyPass(mesh);
+      ++frames;
+    }
+    std::snprintf(what, sizeof what, "step %.2f: beautify settles after the stroke (%d frames)", step, frames);
+    check(mesh.dirtyVertices.empty(), what);
   }
 }
 

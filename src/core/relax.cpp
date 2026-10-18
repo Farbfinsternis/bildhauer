@@ -50,29 +50,58 @@ void updateVertexNormal(Mesh& mesh, int v) {
 }
 
 int beautifyPass(Mesh& mesh) {
-  // Works through the dirty list; vertices that stay dirty, and vertices
-  // dirtied during the pass, go to the fresh list.
+  // Works through the dirty list; vertices that moved, and vertices dirtied
+  // during the pass, go to the fresh list. Sculptris keeps vertices that can
+  // never move (boundary, level 0, too curved) dirty; here they leave the
+  // list, so a settled mesh has an empty list.
   std::vector<int> list;
   list.swap(mesh.dirtyVertices);
   std::vector<int> moved;
+  const bool quads = !mesh.quadMarkers.empty();
   for (int v : list) {
     Vertex& vx = mesh.vertex(v);
     if (!vx.active || !vx.dirty) continue;
-    if (vx.relaxCountdown == 0) {
+    auto settle = [&] {
       vx.dirty = false;
+      vx.relaxCountdown = 0;
+    };
+    if (vx.relaxCountdown <= 1 || vx.hidden || vx.numEdges < 2 || isBoundaryVertex(mesh, v)) {
+      settle();
       continue;
     }
-    mesh.dirtyVertices.push_back(v);
-    --vx.relaxCountdown;
-    if (vx.hidden || isBoundaryVertex(mesh, v)) continue;
     Vec3 meanNormal;
     for (int i = 0; i < vx.numEdges; ++i) meanNormal += mesh.vertex(mesh.edge(vx.edges[i]).other(v)).normal;
-    if (vx.numEdges == 0) continue;
-    float flat = length(meanNormal / float(vx.numEdges));
-    float f = std::clamp((flat - 0.5f) * 2.1f, 0.0f, 1.0f);
+    float f = (length(meanNormal / float(vx.numEdges)) - 0.5f) * 2.1f;
+    if (f < 0) {
+      settle();
+      continue;
+    }
+    f = std::min(f, 1.0f);
     f *= f;
-    if (f <= 0) continue;
-    relaxTangential(mesh, v, f);
+    Vec3 sum;
+    float len = 0;
+    int count = 0;
+    for (int i = 0; i < vx.numEdges; ++i) {
+      const Edge& e = mesh.edge(vx.edges[i]);
+      if (quads && e.quadDiagonal) continue;
+      const Vec3& q = mesh.vertex(e.other(v)).pos;
+      sum += q;
+      len += length(q - vx.pos);
+      ++count;
+    }
+    if (count == 0) {
+      settle();
+      continue;
+    }
+    Vec3 d = sum / float(count) - vx.pos;
+    d -= vx.normal * dot(vx.normal, d);
+    if (length(d) < 0.04f * len / float(count)) {  // converged
+      settle();
+      continue;
+    }
+    vx.pos += d * (0.9f * f);
+    if (vx.onSymmetryPlane) vx.pos.x = 0;
+    mesh.dirtyVertices.push_back(v);  // still flagged, so markDirty would not re-add it
     markDirty(mesh, v);
     moved.push_back(v);
   }

@@ -24,15 +24,15 @@ space ("ran out of … storage, allocate more"). **[sure]**
 |---|---|
 | +0x00 | `active` |
 | +0x02 | `dirty` (needs normal/relax update) |
-| +0x03 | `relaxCountdown`: remaining beautify iterations (new vertex: 5, after collapse: 10) **[likely]** |
+| +0x03 | relax level: how far a change spreads for beautify (new vertex 5, moved by a brush or collapse 10; see 5.2) |
 | +0x06 | `onSymmetryPlane` (x == 0) |
-| +0x07 | `hidden` (hidden via H+click; hidden elements are not in the work sets) **[likely]** |
+| +0x07 | `hidden`; hidden elements are left out of the visible and work sets |
 | +0x0C | index (temporary, for saving) |
-| +0x18 | `weight` f32: 1 = editable, 0 = masked. Masked regions are neither tessellated nor reduced; new vertices get the mean of the edge endpoints **[likely]** |
+| +0x18 | `weight` f32: 1 = editable, 0 = masked. `NewVertex` sets 0, a split vertex gets the mean of the edge endpoints. Fully masked triangles are not tessellated (except while painting the mask), masked vertices are not reduced |
 | +0x1C | position |
-| +0x28 | reference position (rest shape; carried along in splits) **[likely]** |
+| +0x28 | reference position (rest shape): `NewVertex` copies the position, a split computes it like the position (2.1), stroke start stores it |
 | +0x34 | normal = normalized sum of the adjacent face normals (unweighted) |
-| +0x40 | reference normal **[likely]** |
+| +0x40 | reference normal: 0 from `NewVertex`, computed by a split, stored at stroke start |
 | +0x4C | up to 24 triangle pointers, count at +0xC8 |
 | +0xCC | up to 24 edge pointers, count at +0x12C |
 | +0x130 | mirror vertex (temporary, while turning symmetry off) |
@@ -45,17 +45,18 @@ space ("ran out of … storage, allocate more"). **[sure]**
 
 | Offset | Field |
 |---|---|
-| +0x00 | `active`; +0x02 `dirty`; +0x04 quad diagonal (set by subdivision, see 6.3) **[likely]**; +0x05 split state (0 = no, 1 = yes, 2 = unchecked) |
+| +0x00 | `active`; +0x02 `dirty`; +0x04 quad diagonal (set by subdivision, see 6.3; beautify ignores these neighbors); +0x05 split state (0 = no, 1 = yes, 2 = unchecked) |
 | +0x08 | slot index (temporary, set by subdivision) |
 | +0x0C, +0x10 | the (at most) 2 adjacent triangles; one 0 → boundary edge |
 | +0x18, +0x1C | endpoints A, B |
 | +0x24 | cached length \|B − A\| |
+| +0x14 | `hidden` |
 
 ### Triangle (100 bytes) **[sure]**
 
 | Offset | Field |
 |---|---|
-| +0x00 | `active`; +0x01 `dirty`; +0x03 "done/out of range" (tessellation flag); +0x04 mask flag (saved); +0x06 longest edge checked; +0x07 visible |
+| +0x00 | `active`; +0x01 `dirty`; +0x03 "done/out of range" (tessellation flag); +0x04 `hidden` (saved in .sc1); +0x06 longest edge checked; +0x07 visible |
 | +0x08 | vertices v0, v1, v2 |
 | +0x18 | edges e0 = (v0,v1), e1 = (v1,v2), e2 = (v2,v0) |
 | +0x24 | face normal normalize((v1 − v0) × (v2 − v0)) |
@@ -84,11 +85,26 @@ space ("ran out of … storage, allocate more"). **[sure]**
 edges; edges without a triangle are removed. The slot index is returned so
 the caller can reuse it.
 
-### Element sets **[likely]**
+### Keeping orientation consistent (`AlignTriangle`, 0x40C150) **[sure]**
 
-Besides the arrays there are index lists for vertices/edges/triangles:
-**visible set** (rendering, picking) and **work set** (operations). Brush and
-reduction operations iterate over the work set only.
+Used by the edge split on every new triangle. It takes the first edge of the
+triangle that has two triangles and looks at the neighbor across it. If the
+shared edge runs in the same direction in both triangles (A→B in each), the
+orientation is inconsistent: the triangle is removed and added again with
+its vertex order reversed, without an orientation hint. Boundary-only
+triangles are left alone.
+
+### Element sets **[sure]**
+
+Besides the arrays there are index lists for vertices, edges and triangles.
+`BuildElementSets` (0x405E10) fills such a set with every active element, or
+only with the elements that are not hidden (vertex +0x07, edge +0x14,
+triangle +0x04). The **visible set** serves rendering and picking. The
+**work set** (vertex list 0x4B1E38, triangle list 0x4B1E50) holds the
+elements of the current brush region (`Brush_UpdateRegion`, see
+[brushes.md](brushes.md) 3.1); brushes, tessellation and beautify iterate
+over it. `NewVertex` appends a new, not hidden vertex to the work set right
+away (0x406130).
 
 ---
 
@@ -114,7 +130,8 @@ M     = Bezier(A, P1, P2, B; t = 0.5)
 The normal of the new vertex: curve tangent from `Bezier(t=0.51) −
 Bezier(t=0.49)`, combined with `normalize(nA + nB)` via two cross products
 into a vector perpendicular to the curve tangent, flipped toward the mean
-normal if needed. **[likely in detail; the principle is sure]**
+normal if needed. **[sure in principle; the exact order of the cross
+products is likely]**
 
 The same computation is repeated for the reference position (+0x28) using the
 reference normals (+0x40). **[sure]**
@@ -132,8 +149,11 @@ Further attributes of the new vertex **[sure]**:
 1. Collect the outer edges of the adjacent triangles (1 triangle → 2 outer
    edges, 2 triangles → 4).
 2. Remove the adjacent triangles and keep their slots.
-3. For each outer edge (a, b), create a triangle (a, b, M), reusing the slots
-   and keeping the orientation of the old triangle.
+3. For each outer edge (a, b), create a triangle (a, b, M), reusing the slots.
+   `AddTriangle` gets the normal of M as orientation hint, and
+   `AlignTriangle` then makes the new triangle agree with its neighbor
+   (section 1).
+4. M is a new vertex (`NewVertex`), so its relax level is 5.
 
 Result: 2 triangles → 4 (interior edge), 1 → 2 (boundary edge). M has
 valence 4 (or 3 at the boundary); each of the opposite vertices gains one
@@ -150,8 +170,9 @@ An edge may only be split if **each** vertex opposite it has at most 18 edges
 
 Called per brush step, before the deformation. **[sure unless marked]**
 
-**Preconditions:** not in paint mode, and global detail factor `G` > 0.15
-(global 0x4B08B0, default 1.1; probably the "Detail" slider, **[likely]**).
+**Preconditions:** not in paint mode, and global detail factor `G` ≥ 0.15
+(global 0x4B08B0, default 1.1). `G` comes from the **Detail [Q]** slider
+`u` (0x4B8C50) as `G = 0.1 + 1.9 · u` (default u ≈ 0.53).
 
 **Detail threshold:**
 
@@ -166,9 +187,13 @@ the Reduce brush with negative strength, which passes `|strength|` (see
 [brushes.md](brushes.md)). A triangle is "too
 coarse" when `size = 3 × longest edge > threshold`.
 
-**Candidates:** visible triangles that are visible, not completely masked
-(at least one vertex weight ≠ 0) and **inside the brush radius**:
-`|brush.center − centroid| ≤ boundingRadius + brush.radius` (brush+0xAC).
+**Candidates:** triangles of the work set that are in the brush region
+(triangle +0x07), not completely masked (at least one vertex weight ≠ 0;
+this test is skipped while painting the mask) and **inside the brush
+radius**: `|brush.center − centroid| ≤ boundingRadius + brush.radius`
+(brush+0xAC). At most 35000 candidates are collected. With "respect mask"
+on (and not painting the mask), the whole step is skipped unless some
+candidate has a vertex with weight > 0.
 
 **Loop (greedy, at most 3000 iterations):**
 
@@ -186,9 +211,10 @@ repeat:
 
 So the mesh is refined from coarse to fine; the globally longest edge is
 always split first. That yields an even triangle size within the brush radius.
-The 3000 limit ("TesselateForBrush bail!!") caps the work per step. After the
-loop the beautify pass (section 5) runs on the new vertices, setting
-"Beautify/relax mesh (always used when adding detail)" **[likely]**.
+The 3000 limit ("TesselateForBrush bail!!") caps the work per step.
+`TesselateForBrush` itself does not relax anything. The new vertices are
+dirty with relax level 5, and the beautify pass that the main loop runs once
+per frame (section 5.2) evens them out over the following frames. **[sure]**
 
 ---
 
@@ -217,7 +243,7 @@ Execution:
 5. Recompute the normal of v1 and all its neighbors; for non-boundary
    vertices apply a **tangential relaxation with factor 0.7** (section 5.1).
    Vertices on the symmetry plane get x = 0.
-6. v1: relax countdown = 10, mark the neighborhood dirty.
+6. v1: relax level = 10, mark the neighborhood dirty.
 
 ### 4.2 Reducing an area (`ReduceMesh`, 0x4105F0; "REDUCE SELECTED", "REDUCE BRUSH") **[sure]**
 
@@ -269,22 +295,46 @@ p = p + d * f                  // f = factor, e.g. 0.7
 Vertices move along the surface toward an even distribution; the shape is
 preserved to first order.
 
-### 5.2 Beautify pass (`Beautify_Pass`, 0x40F210) **[likely]**
+### 5.2 Beautify pass (`Beautify_Pass`, 0x40F210) **[sure]**
 
-Per dirty vertex of the work set with `relaxCountdown > 0`, not on the
-boundary:
+**When.** The main loop runs **one pass per frame** (driver 0x40F600) unless
+in paint mode, and only if the option "Beautify/relax mesh (always used when
+adding detail)" is on or `G` > 0.15, so with detail on it always runs.
+`ReduceMesh` runs it 10 times in a row. The pass keeps running in later
+frames, also after the stroke, as long as vertices are dirty. If three passes
+in a row move nothing, the mesh counts as settled (0x4B14DF).
+
+**Relax level** (vertex +0x03). It is not counted down per pass. A new
+vertex gets 5, a vertex moved by a brush or a collapse 10.
+`Vertex_MarkDirty` (0x409D30) marks the vertex, its edges and triangles
+dirty and raises every neighbor's level to at least `level − 2` (a negative
+result counts as 0). The level thus fades over the rings around a change
+(10, 8, 6, 4, 2): it limits how far the relaxation spreads.
+
+**Per vertex of the work set:**
 
 ```
-flat   = |mean(neighbor normals)|              // 1 = flat, smaller = curved
-f      = clamp((flat - 0.5) * 2.1, 0, 1)^2
-relax tangentially toward the neighbor centroid, scaled by f
+level 1:              settle: clear dirty on the vertex, its edges and
+                      triangles; level = 0
+not dirty, level > 0: level = 0
+dirty, level 0:       nothing
+dirty, level ≥ 2, active:
+    skip boundary vertices (an edge with one triangle) and vertices with
+    fewer than 2 edges
+    flat = |mean of the neighbor normals|          // 1 = flat
+    f    = (flat − 0.5) · 2.1;  stop if f < 0;  f = min(f, 1)²
+    over the edges (quad diagonals left out when the mesh has quads):
+        c = mean of the neighbor positions, L = mean edge length
+        (the edge lengths are refreshed on the way)
+    d = c − p;  d = d − n · dot(n, d)               // tangential part
+    if |d| ≥ 0.04 · L:  p += d · 0.9 · f;  Vertex_MarkDirty(v)
+    else:               dirty = false                // converged
 ```
 
-So relaxation happens mainly in flat areas; sharp creases and peaks are
-preserved. The countdown drops per pass. Neighbors of a changed vertex get at
-least `countdown − 2` (`Vertex_MarkDirty` 0x409D30), so the relaxation
-spreads over a few rings and then stops. Optionally multithreaded
-(`mt_beautify` in config.txt).
+Relaxation thus happens mainly in flat areas, while sharp creases and peaks
+stay. A vertex keeps moving every frame until its step drops below 4 % of
+its edge length; each move re-marks the neighborhood within the fading
+level. Multithreaded if `mt_beautify` is set in config.txt.
 
 ---
 
@@ -349,10 +399,12 @@ following slot is inactive is dropped (likely never happens).
 4. Create the faces with `AddTriangle` (no reference normal, so no
    orientation flip). A quad (a, b, c, d) becomes the triangles (a, b, c) and
    (c, d, a). Their shared edge c–a is marked as a quad diagonal
-   (edge +0x04 **[likely]**), and the new polygon list gets 1, 2 for the pair
+   (edge +0x04), and the new polygon list gets 1, 2 for the pair
    and 0 for each plain triangle.
 5. Afterwards:
-   - unhide everything (`0x4060B0`) **[likely]**;
+   - unhide everything (`UnhideAll`, 0x4060B0): rebuild the element set
+     with all elements (0x405E10) and clear the hidden flags of vertices,
+     edges and triangles;
    - rebuild the work sets with all active elements;
    - with symmetry on: vertices with x = 0 get `onSymmetryPlane`, and
      those vertices are snapped onto the plane (x of position, reference
@@ -376,5 +428,5 @@ logs "sd_verts overflow" and exits.
 
 ## 7. Open points
 
-- `AlignTriangle` (0x40C150): makes orientation consistent; details open.
-- Subdivision: the job of `0x405E10` in the unhide step.
+- Purpose of the vertex fields +0xC4, +0x134 and +0x13C, which `NewVertex`
+  sets to 5, 0x19 and 0.
