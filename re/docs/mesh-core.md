@@ -159,8 +159,9 @@ Called per brush step, before the deformation. **[sure unless marked]**
 threshold = brush.detailSize / (2 * s) / G
 ```
 
-`brush.detailSize` (brush+0xB0) comes from the brush settings and view scale
-**[open: exact mapping]**. `s` (call argument) is 1.0 for every brush, except
+`brush.detailSize` (brush+0xB0) equals the brush radius before size
+pressure (see [brushes.md](brushes.md) 2.4), so the detail scales with the
+brush and therefore with the view depth. `s` (call argument) is 1.0 for every brush, except
 the Reduce brush with negative strength, which passes `|strength|` (see
 [brushes.md](brushes.md)). A triangle is "too
 coarse" when `size = 3 × longest edge > threshold`.
@@ -375,7 +376,5 @@ logs "sd_verts overflow" and exits.
 
 ## 7. Open points
 
-- How the brush parameters `+0xAC` (radius) and `+0xB0` (detail size) follow
-  from the UI sliders (see [brushes.md](brushes.md)).
 - `AlignTriangle` (0x40C150): makes orientation consistent; details open.
 - Subdivision: the job of `0x405E10` in the unhide step.

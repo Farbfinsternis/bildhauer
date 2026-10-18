@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 
+#include "core/brush_params.h"
 #include "core/reduce.h"
 #include "core/relax.h"
 #include "core/tessellate.h"
@@ -47,8 +48,9 @@ const char* toolName(Tool tool) {
 }
 
 Stroke::Stroke(Mesh& mesh, const BrushSettings& settings, const StrokeInput& start)
-    : mesh_(mesh), s_(settings), start_(start), lastPoint_(start.point), anchor_(start.point) {
-  if (s_.spacing <= 0) s_.spacing = s_.radius / 4;
+    : mesh_(mesh), s_(settings), start_(start), sampleB_(start.point), sampleC_(start.point),
+      anchor_(start.point) {
+  if (mesh_.symmetric && anchor_.x < 0) anchor_.x = -anchor_.x;
   mesh_.storeReference();
   if (s_.detailFactor >= 0.1f || s_.tool == Tool::Reduce) mesh_.clearQuads();
   if (s_.tool == Tool::Grab || s_.tool == Tool::Rotate || s_.tool == Tool::Scale) dab(anchor_, start);
@@ -92,19 +94,30 @@ void Stroke::moveTo(const StrokeInput& in) {
     return;
   }
   if (!in.hit) return;  // off the model: wait until the pointer is back
-  // Walk from the previous point to the new one; dab every `spacing`.
-  Vec3 from = lastPoint_, to = in.point;
-  float dist = length(to - from);
-  int steps = std::max(1, int(dist * 10 / s_.spacing));
-  for (int i = 0; i <= steps; ++i) {
-    Vec3 q = from + (to - from) * (float(i) / steps);
-    if (!hasDab_ || length(q - lastDab_) >= s_.spacing) {
-      lastDab_ = q;
-      hasDab_ = true;
+  // Sample the curve through the last samples finely and dab whenever the
+  // path has moved on by `spacing`. The older sample only advances once a dab
+  // was placed, so slow movement accumulates.
+  const Vec3 a = in.point;
+  const float spacing = s_.spacingFactor * s_.radius;
+  const int n = std::min(100000, int(length(a - sampleC_) * 10 / spacing));
+  Vec3 last = sampleC_;
+  bool placed = false;
+  for (int i = 0; i <= n; ++i) {
+    Vec3 q = dabCurve(sampleC_, sampleB_, a, n > 0 ? float(i) / n : 0.0f);
+    if (firstDab_ || length(q - last) > spacing) {
+      firstDab_ = false;
+      placed = true;
+      last = q;
       dab(q, in);
     }
   }
-  lastPoint_ = to;
+  if (placed) sampleC_ = sampleB_;
+  sampleB_ = a;
+}
+
+void Stroke::setSize(float radius, float detailSize) {
+  s_.radius = radius;
+  s_.detailSize = detailSize;
 }
 
 void Stroke::dab(Vec3 c, const StrokeInput& in) {

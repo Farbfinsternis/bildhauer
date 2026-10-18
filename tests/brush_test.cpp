@@ -12,6 +12,7 @@
 #include <string>
 
 #include "core/brush.h"
+#include "core/brush_params.h"
 #include "core/pick.h"
 #include "io/sc1.h"
 #include "test_util.h"
@@ -36,7 +37,7 @@ StrokeInput inputAt(const Mesh& m, const Camera& cam, const Vec3& target, float 
   in.mouseY = my;
   PickHit h = pick(m, in.rayOrigin, in.rayDir);
   if (hit) *hit = h.hit;
-  in.point = h.hit ? h.point : target;
+  in.point = h.hit ? h.visiblePoint() : target;
   in.hit = h.hit;
   return in;
 }
@@ -50,6 +51,33 @@ float displacement(const Mesh& m, const Vec3& c, float radius) {
     if (vx.active && length(vx.pos - c) < radius) sum += dot(vx.pos - vx.refPos, vx.normal);
   }
   return sum;
+}
+
+bool near(float a, float b, float eps = 1e-4f) { return std::fabs(a - b) <= eps; }
+bool near(const Vec3& a, const Vec3& b, float eps = 1e-5f) { return length(a - b) <= eps; }
+
+// Slider mapping and dab path against the values in re/docs/brushes.md 2.3/2.4.
+void testParams() {
+  std::printf("brush parameters\n");
+  check(near(brushStrength(0), 0.1335f) && near(brushStrength(1), 1.9735f), "strength: 0.13 ... 1.97");
+  check(near(brushRadius(0.3f, 10), 10 * 0.12f * (1.7f * std::pow(0.3f, 1.9f) + 0.03f)), "radius: proportional to depth");
+  check(near(brushRadius(0.3f, 20) / brushRadius(0.3f, 10), 2), "radius: doubles with depth");
+  check(brushRadius(0.4f, 10, 1.0f) > brushRadius(0.4f, 10, 0.5f), "radius: wider FOV, larger radius");
+  check(fovDegrees(0) == 15 && fovDegrees(0.5f) == 35 && fovDegrees(1) == 55, "FOV slider: 15 ... 55 degrees");
+  check(near(spacingFactor(0), 0.05f) && near(spacingFactor(1), 5.0f), "spacing factor: 0.05 ... 5");
+  check(near(pressureCurve(1), 1) && near(pressureCurve(0.5f), std::pow(0.5f, 1.12f)), "pressure curve");
+  check(near(defaultSliders(Tool::Smooth).size, 0.2f) && near(defaultSliders(Tool::Flatten).strength, 0.4f) &&
+            near(defaultSliders(Tool::Draw).strength, 1),
+        "slider defaults");
+
+  const Vec3 c{0, 0, 0}, b{1, 0, 0}, a{1, 1, 0};
+  check(near(dabCurve(c, b, a, 0), (c + b) * 0.5f) && near(dabCurve(c, b, a, 1), (b + a) * 0.5f),
+        "dab curve: midpoint to midpoint");
+  Vec3 m = dabCurve(c, b, a, 0.5f);
+  check(m.x > 0.75f && m.y < 0.25f, "dab curve: cuts the corner toward the middle sample");
+  check(near(dabCurve(b, b, b, 0.3f), b), "dab curve: a resting pointer stays put");
+  Vec3 onLine = dabCurve({0, 0, 0}, {1, 0, 0}, {2, 0, 0}, 0.4f);
+  check(near(onLine.y, 0) && onLine.x > 0.5f && onLine.x < 1.5f, "dab curve: straight samples, straight path");
 }
 
 float surfaceDistance(const Mesh& m, const Camera& cam, const Vec3& target) {
@@ -166,6 +194,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "usage: brush_test <file.sc1>...\n");
     return 2;
   }
+  testParams();
   for (int i = 1; i < argc; ++i) testFile(argv[i]);
   std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");
   return failures ? 1 : 0;

@@ -67,11 +67,12 @@ buildildhauer.exe "F:GrafikSculptris Alpha 6modelshead.sc1"
 ```
 
 Without a file it starts with an icosphere. Mouse: LMB sculpt (Ctrl inverts;
-with Mask, Ctrl unmasks), RMB or Alt+LMB orbit, MMB pan, wheel zoom. Keys as in
-Sculptris: D Draw, B Smooth, G Grab, C Inflate, F Flatten, V Pinch, M Mask,
-E Crease, R Rotate, T Scale, Y Reduce brush; pressing a tool key again toggles
-its option (Clay, Lock plane, Global). `[` `]` size, `-` `=` strength, W
-wireframe, Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+Z undo, Ctrl+S save as
+with Mask, Ctrl unmasks; Shift smooths), RMB or Alt+LMB orbit, MMB pan, wheel
+zoom. Keys as in Sculptris: D Draw, B Smooth, G Grab, C Inflate, F Flatten,
+V Pinch, M Mask, E Crease, R Rotate, T Scale, Y Reduce brush; pressing a tool
+key again toggles its option (Clay, Lock plane, Global). Each tool has its own
+size and strength slider: `[` `]` (or `,` `.`) change the size, with Ctrl the
+strength (also `-` `=`); the brush keeps its size on screen. W wireframe, Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+Z undo, Ctrl+S save as
 `<name>_bildhauer.sc1`. `--snapshot out.png [--demo]` renders one frame
 (after a few demo strokes) and exits.
 

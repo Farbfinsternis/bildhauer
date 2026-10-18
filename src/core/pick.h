@@ -16,6 +16,9 @@ struct PickHit {
   Vec3 point;             // on the stored mesh
   Vec3 normal;            // face normal on the stored mesh
   bool mirrored = false;  // hit on the mirrored half
+
+  // The hit where it is seen: on the mirrored half if that was hit.
+  Vec3 visiblePoint() const { return mirrored ? Vec3{-point.x, point.y, point.z} : point; }
 };
 
 PickHit pick(const Mesh& mesh, const Vec3& origin, const Vec3& dir);

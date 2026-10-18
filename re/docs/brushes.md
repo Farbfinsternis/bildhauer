@@ -64,9 +64,10 @@ sculpting at symmetry line" (0x4B08E6, default on).
 | +0x0C | grab anchor (stroke start / previous dab) |
 | +0x18 | copy of the center (region test) |
 | +0x24 | center of the current work region |
-| +0x30 | current picked surface point; +0x3C previous one |
+| +0x30 | last stroke sample `B`; +0x3C the sample before it, `C` (see 2.3) |
 | +0x60 | work region radius; +0x64 region valid |
 | +0x68 | view-dependent direction used by Flatten weighting **[likely: view direction]** |
+| +0x88 | view depth of the picked point (see 2.4 and 5) |
 | +0x8C | dab was mirrored to the +x side |
 | +0x90, +0x94 | mouse position; +0x9C, +0xA0 mouse at stroke start |
 | +0xA8 | first dab of the stroke |
@@ -75,8 +76,8 @@ sculpting at symmetry line" (0x4B08E6, default on).
 | +0xB4 | strength `s` (signed; negative = inverted) |
 | +0xB8 | dab spacing |
 
-How +0xAC, +0xB0 and +0xB4 follow from the Size/Strength sliders and the
-view scale is **[open]**.
+How +0xAC, +0xB0, +0xB4 and +0xB8 follow from the sliders, the view and the
+pen is described in 2.4.
 
 ### 2.2 Stroke start
 
@@ -86,22 +87,125 @@ state**: `ref = p`, reference normal = `n` for all work-set vertices
 Grab) work relative to this state, so a stroke cannot build up beyond a
 limit however often it passes over the same spot.
 
-### 2.3 Dab spacing (in main_logic, around 0x454BD3)
+### 2.3 Dab path and spacing (in main_logic, around 0x454BD3) **[sure]**
 
-Between the previous picked point P0 (+0x3C) and the current P1 (+0x30):
+The stroke keeps the last two pointer samples on the surface: `B` (+0x30)
+and the one before, `C` (+0x3C). At stroke start both are the start point,
+and the first dab is forced. Each frame with a new picked point `A` (x
+negated when the pick hit the mirrored half):
+
+**Path.** Dabs follow a curve that cuts the corner at `B`
+(`DabCurve`, 0x44DD60, evaluated by the cubic Bézier helper 0x402C90):
 
 ```
-n = floor(|P1 − P0| · 10 / spacing)          // spacing = +0xB8
+k0 = C + 0.5  · (B − C)        // midpoint of C–B: curve start
+k1 = C + 0.85 · (B − C)
+k2 = A + 0.85 · (B − A)
+k3 = A + 0.5  · (B − A)        // midpoint of B–A: curve end
+q(t) = (1−t)³·k0 + 3t(1−t)²·k1 + 3t²(1−t)·k2 + t³·k3
+```
+
+The curve runs from the middle of the previous segment to the middle of the
+current one, pulled toward `B`. With handles at 0.85 it is almost the
+quadratic B-spline of the samples (exactly that at 5/6 ≈ 0.833); the stroke
+therefore lags half a segment behind the pointer and never has corners.
+
+**Spacing.**
+
+```
+n = floor(|A − C| · 10 / spacing)            // spacing = +0xB8
+last = C
 for i = 0..n:
-    q = curve(P0, P1, i/n)                    // 0x44DD60, interpolating curve
-    if |q − lastDab| ≥ spacing (or first dab):
-        if symmetry on and q.x < 0: q.x = −q.x, set +0x8C
-        c = q; Brush_Dispatch(tool, stroke)
+    q = q(i/n)                                // i/n = 0 for n = 0
+    if |q − last| > spacing or first dab of the stroke:
+        last = q
+        c = q; if symmetry on and c.x < 0: c.x = −c.x, set +0x8C
+        Brush_Dispatch(tool, stroke)
+if a dab was placed: C = B
+B = A
 ```
 
-So dabs are spaced by `spacing` along the stroke. With symmetry on, every dab
-is mapped to the stored +x half. **[sure; the curve type of 0x44DD60 is
-open]**
+`last` restarts at `C` every frame. `C` only advances in frames that placed
+a dab, so slow pointer movement accumulates until the path is long enough.
+With symmetry on, every dab is mapped to the stored +x half.
+
+**Exceptions.** Grab, Rotate and Scale skip the path: they dispatch once per
+frame at the picked point (see 4.9 and 4.10). With Shift held, the dab path
+is used with the Smooth tool, whatever tool is selected.
+
+### 2.4 Size, strength and spacing (main_logic, around 0x450A6A) **[sure unless marked]**
+
+Each tool has its own **Size** and **Strength** slider, both in [0, 1]
+(arrays 0x4B1E60 and 0x4B17F8, indexed by the tool ID). The values are
+recomputed every frame while the pointer is over the viewport, so the radius
+follows the depth under the cursor during a stroke.
+
+**Radius.** Proportional to the view depth `z` of the point under the
+cursor (stroke +0x88, eye-space distance along the view axis, see 5), so the
+brush keeps its size on screen when zooming:
+
+```
+r = z · 0.12 · a(size) · (fov + 0.5)^1.45
+a(size) = 1.7 · size^1.9 + 0.03           sculpt mode
+        = 2 · size^3 + 0.015              paint mode
+```
+
+`fov` is the FOV slider (0x4B0900, [0, 1], default 0.5); the camera angle
+is `15° + 40° · fov` (default 35°). The factor `(fov + 0.5)^1.45` (1 at the
+default) roughly compensates the wider view, so a slider value gives a
+similar screen size at every FOV. Example: size 0.3, default FOV, depth z →
+`r ≈ 0.024 z`, about 8 % of half the viewport height.
+
+**Strength.**
+
+```
+s = 1.15 · (strength + 0.3)² + 0.03        // 0.13 … 1.97
+s = −s   if the invert toggle (0x4FD147) is on
+```
+
+With Shift held (temporary Smooth), the strength comes from the **Smooth**
+slider, while the size stays that of the selected tool.
+
+**Pen pressure.** With a tablet, the pressure `p` ∈ [0, 1] is shaped by the
+"Pressure sensitivity" slider `σ` (0x4B08E0, default 0.35):
+
+```
+P = p^(1 − (σ − 0.5) · 0.8)                // σ = 0.35 → p^1.12
+```
+
+At the start of a stroke and on each frame of it (the stroke being active):
+
+```
+detailSize = r                              // +0xB0, before size pressure
+if "Strength pressure" (0x4B08B9, default on):  s = s · P
+if "Size pressure"     (0x4FD13C, default off): r = r · (0.98 · P + 0.02)
+                                             (not for Grab, Rotate, Scale)
+```
+
+Without a tablet `P = 1`. Before the pressure is applied, `s` can be
+negated once more for the stroke; the conditions involve Ctrl and a pen
+button flag, which also negates `P`. How these combine is **[open]**; for
+the implementation, "Ctrl held = inverted" is enough.
+
+So the **detail size equals the radius** (before size pressure): with the
+tessellation threshold of [mesh-core.md](mesh-core.md) section 3, triangles
+under the brush are split until `3 · longest edge ≤ r / (2 · G)`, i.e.
+longest edge ≤ `r / 6.6` at the default `G = 1.1`. Finer detail needs a
+smaller brush or a higher detail factor.
+
+**Spacing.** `spacing = f · r` with the "Brush spacing" factor `f`
+(0x4B08D0, default 0.25). Its slider `u` maps as `f = 4.95 · u² + 0.05`
+(0.05 … 5).
+
+**Slider defaults** (from the reset routine 0x44B7C0, before any saved
+settings are loaded **[likely: a saved settings-sculpt.dat overrides
+them]**): size 0.3 for every tool except Smooth (0.2); strength 1.0 for
+every tool except Smooth and Flatten (0.4).
+
+**Keyboard.** `]`/`.` and `[`/`,` change the current tool's size by ±0.1;
+with Ctrl held they change its strength. Values are clamped to [0, 1].
+"Unify tool settings" (0x4FD15C) copies the current tool's size and strength
+to all tools.
 
 ## 3. Shared building blocks
 
@@ -374,9 +478,18 @@ Both work from `ref` with the falloff
   Triangle +0x06 serves as a "visited" mark during the query. With symmetry
   on, the mirrored ray (x negated) is tested too, so strokes on the mirrored
   half hit the stored half.
-- 0x408CB0 reads a 10×10 block of depth values under the mouse
-  (`glReadPixels`, GL_DEPTH_COMPONENT/GL_FLOAT). What it is used for is
-  **[open]**.
+- **Sculpt mode picks through the depth buffer, not the tree.** 0x408CB0
+  reads a 10×10 block of depth values around the mouse after rendering
+  (`glReadPixels`, GL_DEPTH_COMPONENT/GL_FLOAT). `PickDepth` (0x409200) takes
+  the value at the mouse pixel and converts it to eye-space depth:
+  `z = 2·n·f / ((f + n) − (f − n)·(2d − 1))` (n, f near/far plane). If
+  `z < 0.99·f` the pick hits; the point is `eye + z · D`, where `D` is the
+  ray through the pixel scaled to unit length along the view axis
+  (`(x·tan(fov/2), y·tan(fov/2), 1)` in camera space). `z` is stored for the
+  brush radius (stroke +0x88, see 2.4). The tree-based `PickSurface` is used
+  only in paint mode (when the tree exists). With symmetry, the mirrored
+  half is rendered too, so a depth pick can land on it; the dab is then
+  mirrored to +x (2.3).
 - How the spatial tree is kept current while tessellation changes the mesh
   is **[open]**. The octree builder (`Octree_Build`, 0x404510) is called on
   load, on symmetry switch and for paint mode.
@@ -394,8 +507,8 @@ Both work from `ref` with the falloff
 
 ## 7. Open points
 
-- Slider → `r`, detail size and `s` mapping (incl. view scale and pressure).
-- Exact curve of the dab interpolation (0x44DD60).
 - Grab/Rotate/Scale symmetry handling in detail; Rotate's helper 0x402EA0.
-- Picking tree maintenance; purpose of the depth readback (0x408CB0).
+- Picking tree maintenance (paint mode only, see 5).
 - Mask brush sign convention in the UI.
+- How Ctrl, the pen button flag and the invert toggle combine into the sign
+  of `s` (2.4).

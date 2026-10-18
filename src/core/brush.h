@@ -1,13 +1,12 @@
 #pragma once
 
 // Sculpting brushes (re/docs/brushes.md). A Stroke stores the reference state
-// when it starts and turns pointer movement into evenly spaced dabs; each
-// dab tessellates under the brush, applies the tool, and updates normals and
-// beautify.
+// when it starts and turns pointer movement into dabs spaced along a smooth
+// path (brush_params.h); each dab tessellates under the brush, applies the
+// tool, and updates normals and beautify.
 //
 // Deviations from Sculptris where the docs leave things open: the work region
-// is a sphere around the dab (twice the brush reach) instead of a box, linear
-// dab interpolation, dab spacing and detail size are plain settings, and
+// is a sphere around the dab (twice the brush reach) instead of a box, and
 // Rotate turns by the horizontal mouse movement.
 
 #include "core/mesh.h"
@@ -22,9 +21,9 @@ struct BrushSettings {
   Tool tool = Tool::Draw;
   float radius = 0.1f;      // world units
   float strength = 0.5f;    // signed; negative = inverted
-  float detailSize = 0.05f; // tessellation threshold base (stroke +0xB0)
+  float detailSize = 0.1f;  // tessellation threshold base (stroke +0xB0); Sculptris: = radius
   float detailFactor = 1.1f;
-  float spacing = 0;        // distance between dabs; 0 = radius / 4
+  float spacingFactor = 0.25f;  // distance between dabs / radius ("Brush spacing")
 
   bool clay = false, soft = false;              // Draw
   bool lockPlane = false, angleFalloff = false; // Flatten
@@ -35,7 +34,8 @@ struct BrushSettings {
 };
 
 struct StrokeInput {
-  Vec3 point;            // picked surface point (ignored by Grab/Rotate/Scale)
+  Vec3 point;            // picked point on the visible surface, mirrored half included
+                         // (ignored by Grab/Rotate/Scale)
   bool hit = true;       // false: the pointer is off the model; surface tools skip it
   Vec3 rayOrigin, rayDir;  // pointer ray
   Vec3 viewDir;          // camera forward
@@ -53,6 +53,9 @@ class Stroke {
  public:
   Stroke(Mesh& mesh, const BrushSettings& settings, const StrokeInput& start);
   void moveTo(const StrokeInput& input);
+  // The radius follows the view depth under the pointer during the stroke;
+  // dab spacing scales with it.
+  void setSize(float radius, float detailSize);
   int dabCount() const { return dabs_; }
   const DabTimes& times() const { return times_; }
 
@@ -77,8 +80,8 @@ class Stroke {
   Mesh& mesh_;
   BrushSettings s_;
   StrokeInput start_;
-  Vec3 lastPoint_, lastDab_;
-  bool hasDab_ = false;
+  Vec3 sampleB_, sampleC_;  // last stroke sample and the one before
+  bool firstDab_ = true;
   int dabs_ = 0;
   DabTimes times_;
 

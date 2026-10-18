@@ -5,10 +5,11 @@
 //                             render one frame (after demo strokes) and exit;
 //                             --frames also writes the mean frame time to out.png.txt
 //
-// Mouse: LMB sculpt (Ctrl inverts; with Mask: Ctrl unmasks), RMB or Alt+LMB
-// orbit, MMB pan, wheel zoom.
+// Mouse: LMB sculpt (Ctrl inverts; with Mask: Ctrl unmasks; Shift smooths),
+// RMB or Alt+LMB orbit, MMB pan, wheel zoom.
 // Keys: D Draw, B Smooth, G Grab, C Inflate, F Flatten, V Pinch, M Mask,
-// E Crease, R Rotate, T Scale, Y Reduce brush; [ ] size, - = strength,
+// E Crease, R Rotate, T Scale, Y Reduce brush; [ ] (or , .) size of the
+// current tool, with Ctrl its strength (also - =),
 // W wireframe, Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+Z undo,
 // Ctrl+S save as <name>_bildhauer.sc1.
 
@@ -29,6 +30,7 @@
 #include <vector>
 
 #include "core/brush.h"
+#include "core/brush_params.h"
 #include "core/mesh.h"
 #include "core/pick.h"
 #include "core/reduce.h"
@@ -40,7 +42,8 @@ using namespace bh;
 namespace {
 
 constexpr float kPi = 3.14159265f;
-constexpr float kFov = 40.0f * kPi / 180.0f;
+constexpr float kFovSlider = 0.5f;
+const float kFov = fovDegrees(kFovSlider) * kPi / 180.0f;
 
 // --- scene -------------------------------------------------------------------
 
@@ -68,7 +71,7 @@ struct App {
   float sceneSize = 1;
 
   BrushSettings brush;
-  float brushPixels = 60;
+  std::array<ToolSliders, int(Tool::Reduce) + 1> sliders;
   std::unique_ptr<Stroke> stroke;
   std::deque<Mesh> undo;
 
@@ -255,9 +258,12 @@ void drawMesh(bool mirrored) {
   glFrontFace(GL_CCW);
 }
 
+ToolSliders& sliders(Tool tool) { return app.sliders[size_t(tool)]; }
+
+// Brush radius at a visible surface point: proportional to its view depth.
 float worldRadius(const Vec3& at) {
-  float d = length(at - app.camera.eye());
-  return app.brushPixels * 2 * d * std::tan(kFov / 2) / float(app.height);
+  float depth = dot(at - app.camera.eye(), app.camera.forward());
+  return brushRadius(sliders(app.brush.tool).size, depth, kFovSlider);
 }
 
 void drawBrushCursor() {
@@ -304,8 +310,8 @@ void render(bool present = true) {
   SwapBuffers(app.hdc);
 
   char title[512];
-  std::snprintf(title, sizeof title, "bildhauer - %s  size %.0fpx  strength %.2f  %s%s|  %d tris  %s",
-                toolName(app.brush.tool), app.brushPixels, app.brush.strength,
+  std::snprintf(title, sizeof title, "bildhauer - %s  size %.1f  strength %.1f  %s%s|  %d tris  %s",
+                toolName(app.brush.tool), sliders(app.brush.tool).size, sliders(app.brush.tool).strength,
                 app.brush.clay ? "clay " : "", app.brush.global ? "global " : "", app.mesh.numTriangles(),
                 app.status.c_str());
   SetWindowTextA(app.hwnd, title);
@@ -327,20 +333,23 @@ StrokeInput inputAt(int mx, int my, PickHit* hitOut = nullptr) {
   in.mouseX = float(mx);
   in.mouseY = float(my);
   PickHit h = pick(app.mesh, in.rayOrigin, in.rayDir);
-  in.point = h.point;
+  in.point = h.visiblePoint();
   in.hit = h.hit;
   if (hitOut) *hitOut = h;
   return in;
 }
 
-void beginStroke(int mx, int my, bool invert) {
+// Shift sculpts with Smooth at the Smooth strength and the current tool's size.
+void beginStroke(int mx, int my, bool invert, bool smoothing) {
   PickHit h;
   StrokeInput in = inputAt(mx, my, &h);
   if (!h.hit) return;
   pushUndo();
   BrushSettings s = app.brush;
-  s.radius = worldRadius(h.point);
-  s.detailSize = s.radius * 0.5f;
+  if (smoothing) s.tool = Tool::Smooth;
+  s.radius = worldRadius(in.point);
+  s.detailSize = s.radius;
+  s.strength = brushStrength(sliders(s.tool).strength);
   // Mask paints toward weight 0 by default (negative strength).
   if (s.tool == Tool::Mask) s.strength = -std::fabs(s.strength);
   if (invert) s.strength = -s.strength;
@@ -357,9 +366,20 @@ void setTool(Tool t) {
   app.brush.tool = t;
 }
 
+void nudge(float& slider, float delta) { slider = std::clamp(slider + delta, 0.0f, 1.0f); }
+
 void onKey(WPARAM key) {
   bool ctrl = GetKeyState(VK_CONTROL) < 0;
   app.status.clear();
+  ToolSliders& tool = sliders(app.brush.tool);
+  switch (key) {
+    case VK_OEM_4:
+    case VK_OEM_COMMA: nudge(ctrl ? tool.strength : tool.size, -0.1f); return;  // [ ,
+    case VK_OEM_6:
+    case VK_OEM_PERIOD: nudge(ctrl ? tool.strength : tool.size, 0.1f); return;  // ] .
+    case VK_OEM_MINUS: nudge(tool.strength, -0.1f); return;
+    case VK_OEM_PLUS: nudge(tool.strength, 0.1f); return;
+  }
   if (ctrl) {
     switch (key) {
       case 'Z':
@@ -384,10 +404,6 @@ void onKey(WPARAM key) {
     case 'T': setTool(Tool::Scale); break;
     case 'Y': setTool(Tool::Reduce); break;
     case 'W': app.wireframe = !app.wireframe; break;
-    case VK_OEM_4: app.brushPixels = std::fmax(5.0f, app.brushPixels / 1.15f); break;   // [
-    case VK_OEM_6: app.brushPixels = std::fmin(400.0f, app.brushPixels * 1.15f); break; // ]
-    case VK_OEM_MINUS: app.brush.strength = std::fmax(0.05f, app.brush.strength - 0.05f); break;
-    case VK_OEM_PLUS: app.brush.strength = std::fmin(1.0f, app.brush.strength + 0.05f); break;
   }
 }
 
@@ -400,7 +416,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDOWN:
       SetCapture(hwnd);
       if (GetKeyState(VK_MENU) < 0) app.orbiting = true;
-      else beginStroke(GET_X_LPARAM(lp), GET_Y_LPARAM(lp), (wp & MK_CONTROL) != 0);
+      else beginStroke(GET_X_LPARAM(lp), GET_Y_LPARAM(lp), (wp & MK_CONTROL) != 0, (wp & MK_SHIFT) != 0);
       app.mouseX = GET_X_LPARAM(lp);
       app.mouseY = GET_Y_LPARAM(lp);
       return 0;
@@ -429,7 +445,13 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         app.camera.target += (app.camera.right() * float(-dx) + app.camera.up() * float(dy)) * scale;
       }
       StrokeInput in = inputAt(x, y, &app.hover);
-      if (app.stroke) app.stroke->moveTo(in);
+      if (app.stroke) {
+        if (in.hit) {
+          float r = worldRadius(in.point);
+          app.stroke->setSize(r, r);
+        }
+        app.stroke->moveTo(in);
+      }
       app.mouseX = x;
       app.mouseY = y;
       return 0;
@@ -526,13 +548,12 @@ bool writePng(const std::string& path, int w, int h, const std::vector<unsigned 
 void runDemo() {
   auto strokeAcross = [&](Tool tool, bool invert, int y0) {
     app.brush.tool = tool;
-    beginStroke(app.width / 2 - 130, y0, invert);
+    beginStroke(app.width / 2 - 130, y0, invert, false);
     for (int i = 0; i <= 40; ++i)
       if (app.stroke) app.stroke->moveTo(inputAt(app.width / 2 - 130 + i * 6, y0 + int(20 * std::sin(i * 0.3))));
     app.stroke.reset();
   };
-  app.brushPixels = 45;
-  app.brush.strength = 0.8f;
+  sliders(Tool::Draw) = sliders(Tool::Mask) = {0.4f, 0.5f};
   strokeAcross(Tool::Draw, false, app.height / 2 - 90);
   strokeAcross(Tool::Draw, true, app.height / 2);
   strokeAcross(Tool::Mask, false, app.height / 2 + 90);
@@ -552,6 +573,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     else if (a == "--demo") demo = true;
     else modelPath = a;
   }
+  for (int t = 0; t < int(app.sliders.size()); ++t) app.sliders[size_t(t)] = defaultSliders(Tool(t));
   if (!modelPath.empty()) {
     if (!loadModel(modelPath)) return 1;
   } else {

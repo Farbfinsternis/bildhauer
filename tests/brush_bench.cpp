@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
     in.camRight = {1, 0, 0};
     in.camUp = {0, 1, 0};
     PickHit h = pick(m, in.rayOrigin, in.rayDir);
-    in.point = h.point;
+    in.point = h.visiblePoint();
     in.hit = h.hit;
     return in;
   };
