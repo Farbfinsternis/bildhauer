@@ -167,8 +167,9 @@ Limits from the log strings: at most 24 triangles/edges per vertex
   files older than version 6. Also open: `extraA` and `extraVec`.
 - The polygon-list byte values (the reader treats 2 specially). The
   triangle flag is the hidden state (see mesh-core.md 1).
-- Exact scale of the bump heights (units per mesh unit) — needs a test file
-  with painted bump.
+- Bump scale (answered in paint.md 3.4): heights are relative to the texel
+  size. A difference of 10 · 2^20 / W between neighboring texels means a
+  45° slope.
 - Meaning of the three material flag bytes (all 0 in the sample) and the gap
   patch+0x14..+0x27.
 - How the axes and the patch center map 3D points into the patch's UV area.

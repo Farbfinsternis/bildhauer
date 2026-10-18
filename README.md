@@ -25,6 +25,7 @@ re/
     mesh-core.md      mesh data structure, edge split, brush tessellation, collapse, reduction, beautify, subdivision
     symmetry.md       mirror symmetry: half-mesh model, switching on/off, plane snapping
     brushes.md        all 11 brushes, stroke/dab model, falloff, mask, picking
+    paint.md          paint mode: color/bump painting, bump normals, matcap shading, material layers
     function-map.md   functions in Sculptris.exe with their debug strings
   tools/
     sc1.js            .sc1 reader/writer, OBJ export (node tools/sc1.js)
@@ -105,11 +106,12 @@ an MCP server. Without a native engine it only covers engine-free PE checks
 | Reduction (collapsing edges), beautify | documented | `CollapseEdge` 0x40E5F0, `ReduceMesh` 0x4105F0 |
 | Subdivision (triangles and quads, smooth/flat) | documented | `SubdivideMesh` 0x40F8C0 |
 | Symmetry (half mesh, on/off, seam) | documented; brush picking on the mirror side open | `SetSymmetry` 0x412170, `Symmetry_SnapPlaneVertices` 0x411FF0 |
-| Brushes (all 11 tools) | documented; slider mapping, Rotate/Scale details open | `Brush_Dispatch` 0x41A740 |
-| Picking (ray cast, spatial tree) | partly documented; tree maintenance open | `PickSurface` 0x408DB0, 0x41BA80 |
-| Paint mode (UV patches, color/bump baking) | open | "building texture mapping" |
-| Matcap rendering | open | `data/*.gls` (behavior only) |
-| `.sbm` format (`SBM-V12`) | open | |
+| Brushes (all 11 tools) | documented, incl. slider mapping and dab path; Rotate/Scale symmetry details open | `Brush_Dispatch` 0x41A740 |
+| Picking (depth buffer in sculpt mode, ray cast + tree in paint mode) | documented; tree maintenance open | `PickDepth` 0x409200, `PickSurface` 0x408DB0 |
+| Paint mode: painting (color, bump, flatten), bump normals | documented; Fill/Clear and stamp details open | `PaintDab` 0x426B90, `PaintTexels` 0x4257A0 |
+| Paint mode: UV atlas | pipeline outlined only; bildhauer uses its own unwrapping (decision 2026-10-18) | `BuildTextureMapping` 0x4275A0 |
+| Matcap shading, material layers | documented | `data/*.gls` (behavior only), slots 0x5174B0 |
+| `.sbm` format (`SBM-V12`) | not used by Alpha 6 (legacy sidecar of old files) | |
 
 Implementation:
 
@@ -121,4 +123,4 @@ Implementation:
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
 | Viewer: matcap rendering, mirrored half, sculpting, undo, save | done (`src/app`), first version |
 | Symmetry switching with plane-valence reduction | open |
-| Paint mode, real matcaps, `.sbm` | open |
+| Paint mode, real matcaps and material layers | open |
