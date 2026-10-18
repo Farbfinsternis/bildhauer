@@ -8,6 +8,14 @@
 // Deviations from Sculptris where the docs leave things open: the work region
 // is a sphere around the dab (twice the brush reach) instead of a box, and
 // Rotate turns by the horizontal mouse movement.
+//
+// Deliberate deviation: symmetry compensation. Sculptris maps every dab onto
+// the stored half and halves both contributions where the brush overlaps its
+// mirror image. A stroke across the plane is thereby folded: everything beside
+// the plane is passed twice, the plane once, and the line dips there. Here a
+// vertex counts per stroke what it received from dabs on its own side and
+// from mirrored dabs, and only the larger of the two takes effect (Draw,
+// Inflate, Pinch, Crease, Flatten).
 
 #include "core/mesh.h"
 
@@ -76,6 +84,11 @@ class Stroke {
 
   float weight(int v) const;
   void updateRegion(const Vec3& c);
+  // The part of falloff `f` that vertex v still gets in this stroke: the
+  // growth of max(direct, mirrored) coverage. `mirrorSide`: the contribution
+  // comes from the other half of the model.
+  float covered(int v, float f, bool mirrorSide);
+  void inheritCoverage(const std::vector<int>& created);
 
   Mesh& mesh_;
   BrushSettings s_;
@@ -89,6 +102,9 @@ class Stroke {
   Vec3 planeN_, planeP_;  // locked Flatten plane
   bool planeLocked_ = false;
   float reduceMin_ = 1e5f;
+
+  bool dabMirrored_ = false;  // current dab was mapped from the mirrored half
+  std::vector<float> coverDirect_, coverMirror_;  // per vertex, this stroke
 
   // Work region: the vertices within regionRadius_ of regionCenter_ (and of
   // its mirror image with symmetry). Rebuilt only when the brush reach leaves

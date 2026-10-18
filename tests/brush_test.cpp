@@ -80,6 +80,62 @@ void testParams() {
   check(near(onLine.y, 0) && onLine.x > 0.5f && onLine.x < 1.5f, "dab curve: straight samples, straight path");
 }
 
+// A Draw stroke straight across the plane of a flat symmetric patch must
+// raise an even ridge: the stroke is folded onto the stored half, which must
+// not weaken the plane region (brush.h, symmetry compensation).
+void testSymmetricStroke() {
+  std::printf("stroke across the symmetry plane\n");
+  Mesh m;
+  const int nx = 30, ny = 40;
+  for (int j = 0; j <= ny; ++j)
+    for (int i = 0; i <= nx; ++i) m.addVertex({1.5f * i / nx, -1 + 2.0f * j / ny, 0});
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i) {
+      int a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+      m.addTriangle(a, b, d);
+      m.addTriangle(a, d, c);
+    }
+  m.symmetric = true;
+  for (int v = 0; v < m.vertexSlots(); ++v) m.vertex(v).onSymmetryPlane = m.vertex(v).pos.x == 0;
+  m.updateGeometry();
+  m.storeReference();
+
+  BrushSettings s;
+  s.tool = Tool::Draw;
+  s.radius = s.detailSize = 0.15f;
+  s.strength = brushStrength(1);
+  for (float step : {0.01f, 0.08f}) {
+    Mesh mesh = m;
+    StrokeInput in;
+    in.viewDir = {0, 0, -1};
+    in.point = {-1.2f, 0, 0};
+    Stroke stroke(mesh, s, in);
+    for (float x = -1.2f + step; x <= 1.2f; x += step) {
+      in.point = {x, 0, 0};
+      stroke.moveTo(in);
+    }
+    // Ridge height along the stroke line, in bins of 0.05.
+    float lo = 1e30f, hi = 0;
+    for (float x = 0; x < 0.6f; x += 0.05f) {
+      float sum = 0;
+      int n = 0;
+      for (int v = 0; v < mesh.vertexSlots(); ++v) {
+        const Vertex& vx = mesh.vertex(v);
+        if (vx.active && std::fabs(vx.refPos.y) < 0.03f && vx.refPos.x >= x && vx.refPos.x < x + 0.05f) {
+          sum += vx.pos.z;
+          ++n;
+        }
+      }
+      if (n == 0) continue;
+      lo = std::fmin(lo, sum / n);
+      hi = std::fmax(hi, sum / n);
+    }
+    char what[96];
+    std::snprintf(what, sizeof what, "step %.2f: ridge even across the plane (%.3f ... %.3f)", step, lo, hi);
+    check(hi > 0 && lo > 0.85f * hi, what);
+  }
+}
+
 float surfaceDistance(const Mesh& m, const Camera& cam, const Vec3& target) {
   PickHit h = pick(m, cam.eye, normalize(target - cam.eye));
   return h.hit ? h.t : -1;
@@ -195,6 +251,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   testParams();
+  testSymmetricStroke();
   for (int i = 1; i < argc; ++i) testFile(argv[i]);
   std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");
   return failures ? 1 : 0;

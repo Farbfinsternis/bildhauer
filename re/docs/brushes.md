@@ -504,6 +504,18 @@ Both work from `ref` with the falloff
   mark dirty. Normals and beautify follow afterwards.
 - Effective radii differ per brush: Draw ≈ r/1.2, Smooth/Mask ≈ r/1.3,
   Inflate/Pinch/Flatten ≈ 1.5r/1.3, Grab ≈ 1.5r/1.1, Crease ≈ 1.6r/1.3.
+- **Weak spot at the symmetry line (observed in the bildhauer prototype,
+  which follows 2.3 and 3.6 exactly).** Every dab is mapped onto the stored
+  half, so a stroke that crosses the plane is folded: the stored half is
+  passed from the outside to the plane and back out again. Everything beside
+  the plane gets two passes, the plane region one. The compensation of 3.6
+  then halves the plane region further. A Draw line across the middle drops
+  to about 60 % at the plane (measured on head.sc1). bildhauer therefore
+  deviates: per stroke and vertex it sums the falloff from dabs on the
+  vertex's own side and from mirrored dabs (mirror passes count for the
+  other side), and only the growth of the larger sum takes effect. A
+  crossing line then stays even (±7 % on a flat symmetric patch), and a
+  dab that overlaps its own mirror image still counts once.
 
 ## 7. Open points
 

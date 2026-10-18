@@ -98,6 +98,7 @@ void Stroke::moveTo(const StrokeInput& in) {
   // path has moved on by `spacing`. The older sample only advances once a dab
   // was placed, so slow movement accumulates.
   const Vec3 a = in.point;
+  if (firstDab_) sampleB_ = sampleC_ = a;  // the stroke may start off the model
   const float spacing = s_.spacingFactor * s_.radius;
   const int n = std::min(100000, int(length(a - sampleC_) * 10 / spacing));
   Vec3 last = sampleC_;
@@ -120,8 +121,46 @@ void Stroke::setSize(float radius, float detailSize) {
   s_.detailSize = detailSize;
 }
 
+float Stroke::covered(int v, float f, bool mirrorSide) {
+  if (!mesh_.symmetric || !s_.compensateSymmetry || f <= 0) return f;
+  if (coverDirect_.size() < size_t(mesh_.vertexSlots())) {
+    coverDirect_.resize(mesh_.vertexSlots(), 0);
+    coverMirror_.resize(mesh_.vertexSlots(), 0);
+  }
+  float& own = (mirrorSide ? coverMirror_ : coverDirect_)[v];
+  const float other = (mirrorSide ? coverDirect_ : coverMirror_)[v];
+  const float before = std::max(own, other);
+  own += f;
+  return std::max(own, other) - before;
+}
+
+void Stroke::inheritCoverage(const std::vector<int>& created) {
+  if (coverDirect_.empty()) return;
+  coverDirect_.resize(mesh_.vertexSlots(), 0);
+  coverMirror_.resize(mesh_.vertexSlots(), 0);
+  std::vector<char> isNew(mesh_.vertexSlots(), 0);
+  for (int v : created) isNew[v] = 1;
+  // A split vertex lies between covered vertices; starting it at zero would
+  // let the next dabs raise it above its neighbors.
+  for (int v : created) {
+    const Vertex& vx = mesh_.vertex(v);
+    float d = 0, m = 0;
+    int n = 0;
+    for (int i = 0; i < vx.numEdges; ++i) {
+      int o = mesh_.edge(vx.edges[i]).other(v);
+      if (isNew[o]) continue;
+      d += coverDirect_[o];
+      m += coverMirror_[o];
+      ++n;
+    }
+    coverDirect_[v] = n ? d / n : 0;
+    coverMirror_[v] = n ? m / n : 0;
+  }
+}
+
 void Stroke::dab(Vec3 c, const StrokeInput& in) {
-  if (mesh_.symmetric && c.x < 0) c.x = -c.x;
+  dabMirrored_ = mesh_.symmetric && c.x < 0;
+  if (dabMirrored_) c.x = -c.x;
   ++dabs_;
   auto clock = std::chrono::steady_clock::now();
   const auto dabStart = clock;
@@ -137,6 +176,7 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
     detail.beautify = false;  // runs once after the tool
     std::vector<int> created;
     tessellateForBrush(mesh_, detail, &region_, &created);
+    inheritCoverage(created);
     inRegion_.resize(mesh_.vertexSlots(), 0);
     for (int v : created)
       if (!inRegion_[v]) { inRegion_[v] = 1; region_.push_back(v); }
@@ -204,27 +244,25 @@ void Stroke::draw(const Vec3& c, bool mirror) {
     if (a > 0) h *= 1.5f;
   }
   const float sign = s >= 0 ? 1.0f : -1.0f;
-  const float comp = mirror && s_.compensateSymmetry ? 1 - 0.5f * (r - c.x) / r : 1.0f;
 
   for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     const Vec3 p = vx.pos;
-    Vec3 move;
-    bool moved = false;
-    auto apply = [&](const Vec3& center, const Vec3& n, const Vec3& origin, float kfall) {
+    // Falloff times the step toward the raised plane; 0 if out of reach or
+    // the step would go against the stroke direction.
+    auto contribution = [&](const Vec3& center, const Vec3& n, const Vec3& origin, float kfall, Vec3& delta) {
       float t = 1 - kfall * length(p - center) / r;
-      if (t <= 0) return;
-      float f = smoothFalloff(t) * weight(v) * comp;
-      Vec3 delta = projectOnPlane(p, origin, n) + n * (sign * h) - p;
-      if (dot(vx.normal, delta) * s <= 0) return;
-      move += delta * (f * k);
-      moved = true;
+      if (t <= 0) return 0.0f;
+      delta = projectOnPlane(p, origin, n) + n * (sign * h) - p;
+      if (dot(vx.normal, delta) * s <= 0) return 0.0f;
+      return smoothFalloff(t) * weight(v);
     };
-    if (mirror) apply(cm, mirrorX(N), mirrorX(R), 1.3f);
-    apply(c, N, R, 1.2f);
-    if (!moved) continue;
-    vx.pos += move;
+    Vec3 d1, d2;
+    float f1 = covered(v, contribution(c, N, R, 1.2f, d1), dabMirrored_);
+    float f2 = mirror ? covered(v, contribution(cm, mirrorX(N), mirrorX(R), 1.3f, d2), !dabMirrored_) : 0.0f;
+    if (f1 <= 0 && f2 <= 0) continue;
+    vx.pos += (d1 * f1 + d2 * f2) * k;
     touched(mesh_, v);
   }
 }
@@ -261,21 +299,23 @@ void Stroke::smooth(const Vec3& c) {
 void Stroke::inflate(const Vec3& c, bool mirror) {
   const float r = 1.5f * s_.radius, s = s_.strength;
   const Vec3 cm = mirrorX(c);
-  const float comp = mirror && s_.compensateSymmetry ? 1 - 0.5f * (r - c.x) / r : 1.0f;
   for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
-    bool moved = false;
-    auto apply = [&](const Vec3& center) {
-      float t = (1 - 1.3f * length(vx.pos - center) / r) * comp;
-      if (t <= 0) return;
+    float t1 = 1 - 1.3f * length(vx.pos - c) / r;
+    float t2 = mirror ? 1 - 1.3f * length(vx.pos - cm) / r : 0.0f;
+    if (t1 <= 0 && t2 <= 0) continue;
+    // The falloff t sets both the dome height and the rate; only the rate is
+    // limited by the coverage.
+    const float rate2 = t2 > 0 ? covered(v, t2 * weight(v), !dabMirrored_) : 0.0f;
+    const float rate1 = t1 > 0 ? covered(v, t1 * weight(v), dabMirrored_) : 0.0f;
+    if (rate1 <= 0 && rate2 <= 0) continue;
+    for (auto [t, rate] : {std::pair{t2, rate2}, std::pair{t1, rate1}}) {
+      if (rate <= 0) continue;
       Vec3 goal = vx.refPos + vx.normal * (r * std::sin(t * kPi / 2));
-      vx.pos += (goal - vx.pos) * (t * weight(v) * 0.02f * s);
-      moved = true;
-    };
-    if (mirror) apply(cm);
-    apply(c);
-    if (moved) touched(mesh_, v);
+      vx.pos += (goal - vx.pos) * (rate * 0.02f * s);
+    }
+    touched(mesh_, v);
   }
 }
 
@@ -299,7 +339,9 @@ void Stroke::pinch(const Vec3& c, bool mirror) {
     if (!usable(vx)) continue;
     float t = 1 - 1.3f * length(vx.pos - c) / r;
     if (t <= 0) continue;
-    vx.pos += (c - vx.pos) * (t * t * weight(v) * 0.1f * s);
+    float f = covered(v, t * t * weight(v), dabMirrored_);
+    if (f <= 0) continue;
+    vx.pos += (c - vx.pos) * (f * 0.1f * s);
     touched(mesh_, v);
   }
 }
@@ -340,7 +382,9 @@ void Stroke::crease(const Vec3& c, bool mirror) {
     float t = 1 - 1.3f * length(vx.pos - c) / r2;
     if (t <= 0) continue;
     float f = t * t * weight(v);
-    vx.pos += (goal - vx.pos) * (f * f * f * std::fabs(s) * 0.35f);
+    float g = covered(v, f * f * f, dabMirrored_);
+    if (g <= 0) continue;
+    vx.pos += (goal - vx.pos) * (g * std::fabs(s) * 0.35f);
     touched(mesh_, v);
   }
 }
@@ -400,7 +444,9 @@ void Stroke::flatten(const Vec3& c, bool mirror, const Vec3& viewDir) {
       f *= std::min(a, 1.0f);
     }
     Vec3 goal = vx.pos - planeN_ * height;
-    vx.pos += (goal - vx.pos) * (f * weight(v) * 0.25f * s);
+    f = covered(v, f * weight(v), dabMirrored_);
+    if (f <= 0) continue;
+    vx.pos += (goal - vx.pos) * (f * 0.25f * s);
     touched(mesh_, v);
   }
 }
@@ -505,6 +551,7 @@ void Stroke::reduce(const Vec3& c) {
     detail.beautify = false;
     std::vector<int> created;
     tessellateForBrush(mesh_, detail, &region_, &created);
+    inheritCoverage(created);
     inRegion_.resize(mesh_.vertexSlots(), 0);
     for (int v : created)
       if (!inRegion_[v]) { inRegion_[v] = 1; region_.push_back(v); }
