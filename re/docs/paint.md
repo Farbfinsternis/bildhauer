@@ -70,6 +70,17 @@ stored in .sc1 (decision 2026-10-18).
 16. **update colormap**: computes the bump normal map (0x424170, see 3.4)
     and uploads the images (0x424790).
 
+**Layers and their start state** **[sure]**. The texture size comes from a
+dialog (`InitTextures(w, h)`, 0x4289E0; default **[open]**). It allocates
+the bump heights (all 2^28) and the color layer, which keeps an RGBA image
+(`0xAABBGGRR`) plus three 16-bit channel planes (R, G, B) that the paint
+code works on; the image gets the planes' high bytes. Whenever the image is
+restored (undo, switching to a material mask), the planes are rebuilt as
+`byte · 257` (0x41C6E0). A fresh color layer is a faint gray checkerboard
+of 8 × 8 texel squares, `0x505050` / `0x575757` (alpha 0); after baking,
+every texel no triangle covers is set to gray `0x6666` in the 16-bit planes.
+The hardness sliders reset to 0.5.
+
 ## 3. Painting
 
 ### 3.1 Tools and settings **[sure]**

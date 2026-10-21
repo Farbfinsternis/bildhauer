@@ -2,7 +2,7 @@
 
 // Sculpting brushes (re/docs/brushes.md). A Stroke stores the reference state
 // when it starts and turns pointer movement into dabs spaced along a smooth
-// path (brush_params.h); each dab tessellates under the brush, applies the
+// path (dab_path.h); each dab tessellates under the brush, applies the
 // tool, and updates normals. Beautify is not part of a dab: like Sculptris,
 // the caller runs one beautifyPass per frame while vertices are dirty.
 //
@@ -18,6 +18,7 @@
 // from mirrored dabs, and only the larger of the two takes effect (Draw,
 // Inflate, Pinch, Crease, Flatten).
 
+#include "core/dab_path.h"
 #include "core/mesh.h"
 
 namespace bh {
@@ -93,8 +94,7 @@ class Stroke {
   Mesh& mesh_;
   BrushSettings s_;
   StrokeInput start_;
-  Vec3 sampleB_, sampleC_;  // last stroke sample and the one before
-  bool firstDab_ = true;
+  DabPath path_;
   int dabs_ = 0;
   DabTimes times_;
 

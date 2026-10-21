@@ -22,12 +22,6 @@ double msSince(std::chrono::steady_clock::time_point& t) {
   return ms;
 }
 
-float smoothFalloff(float x) {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-  return (1 - std::cos(kPi * x)) / 2;
-}
-
 Vec3 mirrorX(Vec3 v) { return {-v.x, v.y, v.z}; }
 
 Vec3 projectOnPlane(const Vec3& p, const Vec3& origin, const Vec3& n) { return p - n * dot(n, p - origin); }
@@ -48,7 +42,7 @@ const char* toolName(Tool tool) {
 }
 
 Stroke::Stroke(Mesh& mesh, const BrushSettings& settings, const StrokeInput& start)
-    : mesh_(mesh), s_(settings), start_(start), sampleB_(start.point), sampleC_(start.point),
+    : mesh_(mesh), s_(settings), start_(start), path_(start.point),
       anchor_(start.point) {
   if (mesh_.symmetric && anchor_.x < 0) anchor_.x = -anchor_.x;
   mesh_.storeReference();
@@ -94,26 +88,7 @@ void Stroke::moveTo(const StrokeInput& in) {
     return;
   }
   if (!in.hit) return;  // off the model: wait until the pointer is back
-  // Sample the curve through the last samples finely and dab whenever the
-  // path has moved on by `spacing`. The older sample only advances once a dab
-  // was placed, so slow movement accumulates.
-  const Vec3 a = in.point;
-  if (firstDab_) sampleB_ = sampleC_ = a;  // the stroke may start off the model
-  const float spacing = s_.spacingFactor * s_.radius;
-  const int n = std::min(100000, int(length(a - sampleC_) * 10 / spacing));
-  Vec3 last = sampleC_;
-  bool placed = false;
-  for (int i = 0; i <= n; ++i) {
-    Vec3 q = dabCurve(sampleC_, sampleB_, a, n > 0 ? float(i) / n : 0.0f);
-    if (firstDab_ || length(q - last) > spacing) {
-      firstDab_ = false;
-      placed = true;
-      last = q;
-      dab(q, in);
-    }
-  }
-  if (placed) sampleC_ = sampleB_;
-  sampleB_ = a;
+  path_.moveTo(in.point, s_.spacingFactor * s_.radius, [&](const Vec3& q) { dab(q, in); });
 }
 
 void Stroke::setSize(float radius, float detailSize) {

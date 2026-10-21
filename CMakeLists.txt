@@ -13,6 +13,7 @@ endif()
 add_library(bildhauer_core
   src/core/brush.cpp
   src/core/mesh.cpp
+  src/core/paint.cpp
   src/core/pick.cpp
   src/core/reduce.cpp
   src/core/relax.cpp
@@ -26,7 +27,7 @@ target_include_directories(bildhauer_core PUBLIC src)
 
 if(WIN32)
   add_executable(bildhauer WIN32 src/app/main.cpp)
-  target_link_libraries(bildhauer PRIVATE bildhauer_core opengl32)
+  target_link_libraries(bildhauer PRIVATE bildhauer_core opengl32 comdlg32)
   target_compile_definitions(bildhauer PRIVATE WIN32_LEAN_AND_MEAN)
 endif()
 
@@ -60,6 +61,10 @@ add_test(NAME brush COMMAND brush_test ${BILDHAUER_SC1_SAMPLES})
 add_executable(texmap_test tests/texmap_test.cpp)
 target_link_libraries(texmap_test PRIVATE bildhauer_core)
 add_test(NAME texmap COMMAND texmap_test ${BILDHAUER_SC1_SAMPLES})
+
+add_executable(paint_test tests/paint_test.cpp)
+target_link_libraries(paint_test PRIVATE bildhauer_core)
+add_test(NAME paint COMMAND paint_test ${BILDHAUER_SC1_SAMPLES})
 
 # Not a test: times strokes phase by phase (brush_bench <file.sc1>).
 add_executable(brush_bench tests/brush_bench.cpp)
