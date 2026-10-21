@@ -26,8 +26,33 @@ add_library(bildhauer_core
 target_include_directories(bildhauer_core PUBLIC src)
 
 if(WIN32)
-  add_executable(bildhauer WIN32 src/app/main.cpp src/app/gl2.cpp src/app/matcaps.cpp)
-  target_link_libraries(bildhauer PRIVATE bildhauer_core opengl32 comdlg32 windowscodecs ole32)
+  # Dear ImGui (MIT, third_party/imgui), with its Win32 and OpenGL 2 backends.
+  add_library(imgui STATIC
+    third_party/imgui/imgui.cpp
+    third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp
+    third_party/imgui/imgui_widgets.cpp
+    third_party/imgui/backends/imgui_impl_win32.cpp
+    third_party/imgui/backends/imgui_impl_opengl2.cpp
+  )
+  target_include_directories(imgui PUBLIC third_party/imgui third_party/imgui/backends)
+  if(MSVC)
+    target_compile_options(imgui PRIVATE /W3)
+  endif()
+
+  add_executable(bildhauer WIN32
+    src/app/main.cpp
+    src/app/app.cpp
+    src/app/dialogs.cpp
+    src/app/document.cpp
+    src/app/gl2.cpp
+    src/app/input.cpp
+    src/app/matcaps.cpp
+    src/app/render.cpp
+    src/app/snapshot.cpp
+    src/app/ui.cpp
+  )
+  target_link_libraries(bildhauer PRIVATE bildhauer_core imgui opengl32 comdlg32 windowscodecs ole32 dwmapi)
   target_compile_definitions(bildhauer PRIVATE WIN32_LEAN_AND_MEAN)
 endif()
 

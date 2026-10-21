@@ -37,14 +37,19 @@ re/
     const.js          read float constants from the EXE
   _work/              disassembly and intermediate results (local only)
 src/                  implementation (C++20, OpenGL)
-  app/                viewer (Win32 + OpenGL; GLSL paint shading when OpenGL 2.0
-                      is there, matcaps computed or read via Windows Imaging)
+  app/                viewer (Win32 + OpenGL): state (app), commands (document),
+                      drawing with GLSL paint shading when OpenGL 2.0 is there
+                      (render, gl2), mouse and keys (input), UI (ui), matcaps
+                      computed or read via Windows Imaging (matcaps), snapshots
   core/               mesh kernel (mesh.h), brushes (brush), picking (pick),
                       edge split + brush tessellation
                       (tessellate), collapse + reduction (reduce), relaxation +
                       beautify (relax), subdivision, symmetry, UV atlas
                       (texmap), painting (paint)
   io/                 .sc1 reader/writer, mesh loading
+third_party/
+  imgui/              Dear ImGui 1.92.9 (MIT, see its LICENSE.txt) with the Win32
+                      and OpenGL 2 backends; only what the viewer needs
 tests/
   sc1_test.cpp        validates io + mesh kernel against real .sc1 files
   ops_test.cpp        runs every mesh operation and checks validity and topology
@@ -72,32 +77,39 @@ ctest --test-dir build --output-on-failure
 build\bildhauer.exe "F:\Grafik\Sculptris Alpha 6\models\head.sc1"
 ```
 
-Without a file it starts with an icosphere. Mouse: LMB sculpt (Ctrl inverts;
-with Mask, Ctrl unmasks; Shift smooths), RMB or Alt+LMB orbit, MMB pan, wheel
-zoom. Keys as in Sculptris: D Draw, B Smooth, G Grab, C Inflate, F Flatten,
-V Pinch, M Mask, E Crease, R Rotate, T Scale, Y Reduce brush; pressing a tool
-key again toggles its option (Clay, Lock plane, Global). Each tool has its own
-size and strength slider: `[` `]` (or `,` `.`) change the size, with Ctrl the
-strength (also `-` `=`); the brush keeps its size on screen. W wireframe,
-Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+Z undo, Ctrl+S save as
-`<name>_bildhauer.sc1`.
+Without a file it starts with an icosphere. The panel on the left holds the
+tools, their sliders and options, and in paint mode the colors and material
+layers; the menus hold the file and mesh commands. Help > Mouse and keys
+lists the shortcuts.
 
-Ctrl+P enters paint mode (one way, as in Sculptris; files with paint data
-open in it): LMB paints, Ctrl inverts (secondary color, lowers the bump).
-D Paint color, B Paint bump, F Flatten bump; `[` `]` size, with Ctrl
-strength, with Shift hardness; K picks the primary color, Shift+K the
-secondary; N shows the bump normal map; Ctrl+Z undo; Ctrl+S saves with the
-paint data. Shading follows paint.md 4.1: the matcap lights the paint color
-like a hard-light layer, with the bump normals. Materials: L adds a layer
-(up to 15), 0-9 choose what Paint color paints (0 the color layer, n the
-mask of layer n), M cycles the built-in matcaps of that slot, O loads a
-matcap image for it, C toggles Colored, A additive blending, H hides the
-layer. Matcap images named in a painted .sc1 are loaded from where the file
-says, if they exist.
+Mouse: LMB sculpts or paints (Ctrl inverts; sculpt: with Mask Ctrl unmasks,
+Shift smooths), RMB or Alt+LMB orbit, MMB pan, wheel zoom.
 
-`--snapshot out.png [--demo] [--paint] [--bump-normals] [--save]` renders
-one frame (after a few demo strokes, in paint mode with paint strokes and a
-gold layer; --save saves first, as Ctrl+S) and exits.
+Keys in both modes: Ctrl+N new, Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save
+as, Ctrl+Z undo, W wireframe; `[` `]` (or `,` `.`) size of the current tool,
+with Ctrl its strength (also `-` `=`). Save asks for the file the first time
+(suggesting `<name>_bildhauer.sc1`), so a loaded file is never overwritten
+without asking; New, Open and closing ask to save unsaved changes.
+
+Sculpt mode, keys as in Sculptris: D Draw, B Smooth, G Grab, C Inflate,
+F Flatten, V Pinch, M Mask, E Crease, R Rotate, T Scale, Y Reduce brush;
+pressing a tool key again toggles its option (Clay, Lock plane, Global).
+Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+P paint mode (asks first: it is one
+way, as in Sculptris).
+
+Paint mode (files with paint data open in it): D Paint color, B Paint bump,
+F Flatten bump; with Shift `[` `]` change the hardness; N shows the bump
+normal map. Shading follows paint.md 4.1: the matcap lights the paint color
+like a hard-light layer, with the bump normals. Materials: L adds a layer (up
+to 15), 0-9 choose what Paint color paints (0 the color layer, n the mask of
+layer n), M cycles the built-in matcaps of that slot, O loads a matcap image
+for it, C toggles Colored, A additive blending, H hides the layer. Matcap
+images named in a painted .sc1 are loaded from where the file says, if they
+exist.
+
+`--snapshot out.png [--demo] [--paint] [--bump-normals] [--save] [--no-ui]`
+renders one frame (after a few demo strokes, in paint mode with paint strokes
+and a gold layer; --save saves as `<name>_bildhauer.sc1` first) and exits.
 
 The test data is not part of the repository. By default the tests use the
 `.sc1` files from `BILDHAUER_SCULPTRIS_DIR` (`data/`, `models/`) and
@@ -143,7 +155,8 @@ Implementation:
 | `.sc1` read/write, mesh loading, mirroring | done (`src/io`); v8 round trip byte-identical, v0 upgrades to v8 |
 | Edge split, brush tessellation, collapse, reduction, beautify, subdivision (incl. quads) | done (`src/core`); topology kept on all samples and a quad cube |
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
-| Viewer: matcap rendering, mirrored half, sculpting, undo, save | done (`src/app`), first version |
+| Viewer: matcap rendering, mirrored half, sculpting, undo, open/save | done (`src/app`) |
+| UI: menus, tool panel (sculpt and paint), colors, material layers, status bar | done (`src/app/ui`, Dear ImGui), first version |
 | Symmetry switching with plane-valence reduction | open |
 | Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
 | Paint mode: painting (color, bump, flatten), bump normals, tile undo | done (`src/core/paint`); formulas checked against paint.md, stored images load unchanged |
