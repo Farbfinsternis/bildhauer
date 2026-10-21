@@ -260,7 +260,11 @@ primary and secondary colors are set aside. If the texture resolution
 changes, the masks are freed.
 
 On loading, the matcap of a slot is read from the stored file name (an
-absolute path into Sculptris' `materials` folder in the samples).
+absolute path into Sculptris' `materials` folder in the samples). A name
+that is no file (bildhauer writes `bildhauer:clay` and the like) does not
+stop the load: a file saved by bildhauer opens in Alpha 6 in paint mode and
+looks the same (checked by hand, 2026-10-21). What Sculptris shows in
+place of the missing matcap **[open]**.
 
 ## 5. Open points
 
