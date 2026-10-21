@@ -31,6 +31,9 @@ void pushUndo();
 void undoLast();  // the last stroke or mesh operation (paint mode: the last stroke)
 void subdivideAll();
 void reduceAll();
+// Turns mirror symmetry on (keeps the +x side) or off (mirrors the half into
+// a full mesh); undoable. Not in paint mode.
+void setSymmetry(bool on);
 
 // Freezes the mesh, builds the UV atlas and a fresh canvas. There is no way
 // back: sculpting would invalidate the mapping.

@@ -22,5 +22,7 @@ bool uiWantsKeyboard();  // a text field has the keyboard
 
 // Paint mode is one way, so entering it asks first (Ctrl+P, menu, button).
 void askEnterPaintMode();
+// Switching symmetry changes the mesh, so it asks first.
+void askSetSymmetry(bool on);
 
 }  // namespace bh::viewer

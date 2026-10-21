@@ -11,6 +11,7 @@
 #include "core/reduce.h"
 #include "core/relax.h"
 #include "core/subdivide.h"
+#include "core/symmetry.h"
 
 namespace bh::viewer {
 
@@ -229,6 +230,26 @@ void reduceAll() {
   if (app.paintMode) return;
   pushUndo();
   reduceMesh(app.mesh);
+  app.modified = true;
+}
+
+void setSymmetry(bool on) {
+  if (app.paintMode || app.mesh.symmetric == on) return;
+  app.stroke.reset();
+  pushUndo();
+  if (on) {
+    const int converted = symmetryOn(app.mesh);
+    app.status = "symmetry on";
+    if (converted > 0) app.status += ", " + std::to_string(converted) + " quads turned into triangles";
+  } else if (symmetryOff(app.mesh)) {
+    app.status = "symmetry off";
+  } else {
+    app.mesh = std::move(app.undo.back());
+    app.undo.pop_back();
+    app.status = "symmetry off failed: a vertex on the plane has too many edges";
+    return;
+  }
+  app.hover = PickHit{};
   app.modified = true;
 }
 

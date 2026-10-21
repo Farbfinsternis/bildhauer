@@ -18,4 +18,26 @@ bool mirrorHalf(const Mesh& half, Mesh& full);
 // both normals (renormalized).
 void snapPlaneVertices(Mesh& mesh);
 
+// Lowers the valence of plane vertices to at most `maxEdges` before
+// mirroring (symmetry.md 2.2 step 1): around each such vertex, quads become
+// triangles, and the shortest edge opposite the vertex in a triangle not yet
+// tried is collapsed, until the valence fits or no candidate is left.
+// Returns the number of collapses.
+int limitPlaneValence(Mesh& mesh, int maxEdges = 10);
+
+// Symmetry off (symmetry.md 2.2): limits the plane valence, then replaces the
+// stored +x half by the full mesh. The mirrored triangles follow the
+// originals in the same order with reversed winding, so quad pairs stay
+// consecutive and keep their diagonals. Plane flags and the mask are
+// cleared. Returns false if a triangle could not be added; the mesh then
+// keeps its half (with the reduced plane valence).
+bool symmetryOff(Mesh& mesh);
+
+// Symmetry on (symmetry.md 2.1): removes every triangle whose centroid lies
+// at x < 0, puts the vertices they leave behind on the plane (x = 0), and
+// removes triangles that end up flat on it; asymmetric detail on the -x side
+// is lost. A quad that lost its partner becomes a triangle. The mask is
+// cleared. Returns the number of quads converted to triangles.
+int symmetryOn(Mesh& mesh);
+
 }  // namespace bh

@@ -10,6 +10,7 @@ namespace bh::viewer {
 struct SnapshotOptions {
   std::string path;   // PNG to write
   bool demo = false;  // a few strokes across the front (paint strokes and a gold layer in paint mode)
+  bool symmetryOff = false;  // turn symmetry off first
   bool paint = false; // enter paint mode first
   bool save = false;  // save as <name>_bildhauer.sc1 before rendering
   bool ui = true;     // draw the UI into the snapshot

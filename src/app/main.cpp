@@ -2,7 +2,7 @@
 //
 //   bildhauer [file.sc1]      (without a file: an icosphere)
 //   bildhauer [file.sc1] --snapshot out.png [--demo] [--paint] [--save]
-//                             [--bump-normals] [--no-ui] [--frames N]
+//                             [--symmetry-off] [--bump-normals] [--no-ui] [--frames N]
 //                             render one frame and exit (snapshot.h);
 //                             --frames also writes the mean frame time to out.png.txt
 //
@@ -132,6 +132,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     else if (a == "--frames" && i + 1 < __argc) snapshot.frames = std::atoi(__argv[++i]);
     else if (a == "--demo") snapshot.demo = true;
     else if (a == "--paint") snapshot.paint = true;
+    else if (a == "--symmetry-off") snapshot.symmetryOff = true;
     else if (a == "--save") snapshot.save = true;
     else if (a == "--no-ui") snapshot.ui = false;
     else if (a == "--bump-normals") app.showBumpNormals = true;

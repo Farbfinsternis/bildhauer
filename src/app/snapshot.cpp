@@ -112,6 +112,7 @@ int runSnapshot(const SnapshotOptions& o) {
   GetClientRect(app.hwnd, &rc);
   app.width = rc.right;
   app.height = rc.bottom;
+  if (o.symmetryOff) setSymmetry(false);
   if (o.paint) enterPaintMode();
   if (o.demo) app.paintMode ? runPaintDemo() : runDemo();
   if (o.save) {

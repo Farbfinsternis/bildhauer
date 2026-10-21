@@ -5,10 +5,13 @@
 //     characteristic and boundary as before, and no edge with > 2 triangles
 //   - plane vertices sit exactly on x = 0 with normal.x = 0
 // Operations: edge split, tessellation under a brush, edge collapse, area
-// reduction, subdivision (smooth and flat), beautify.
+// reduction, subdivision (smooth and flat), beautify, switching symmetry off
+// and on.
 //
 // Usage: ops_test [file.sc1...]
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -17,6 +20,7 @@
 #include "core/reduce.h"
 #include "core/relax.h"
 #include "core/subdivide.h"
+#include "core/symmetry.h"
 #include "core/tessellate.h"
 #include "io/sc1.h"
 #include "test_util.h"
@@ -25,6 +29,56 @@ using namespace bh;
 using namespace bhtest;
 
 namespace {
+
+// Quad pairs are consecutive triangles marked 1, 2 that share T1's edge e2,
+// which carries the diagonal flag; no other edge has it.
+bool quadsCoherent(const Mesh& m) {
+  int flagged = 0, pairs = 0;
+  for (int e = 0; e < m.edgeSlots(); ++e) flagged += m.edge(e).active && m.edge(e).quadDiagonal;
+  for (int t = 0; t < int(m.quadMarkers.size()); ++t) {
+    const uint8_t q = m.quadMarkers[t];
+    if (q == 0) continue;
+    if (!m.triangle(t).active) return false;
+    if (q == 2) {
+      if (t == 0 || m.quadMarkers[t - 1] != 1) return false;
+      continue;
+    }
+    if (t + 1 >= int(m.quadMarkers.size()) || m.quadMarkers[t + 1] != 2 || !m.triangle(t + 1).active) return false;
+    const Edge& d = m.edge(m.triangle(t).e[2]);
+    if (!d.quadDiagonal || (d.tri[0] != t + 1 && d.tri[1] != t + 1)) return false;
+    ++pairs;
+  }
+  return flagged == pairs;
+}
+
+bool maskCleared(const Mesh& m) {
+  for (int v = 0; v < m.vertexSlots(); ++v)
+    if (m.vertex(v).active && m.vertex(v).weight != 1) return false;
+  return true;
+}
+
+// Every vertex off the plane has a mirror vertex at (-x, y, z).
+bool mirrorSymmetric(const Mesh& m) {
+  std::vector<std::array<float, 3>> pts;
+  for (int v = 0; v < m.vertexSlots(); ++v)
+    if (m.vertex(v).active) pts.push_back({m.vertex(v).pos.x, m.vertex(v).pos.y, m.vertex(v).pos.z});
+  std::sort(pts.begin(), pts.end());
+  for (const auto& q : pts)
+    if (!std::binary_search(pts.begin(), pts.end(), std::array<float, 3>{-q[0], q[1], q[2]})) return false;
+  return true;
+}
+
+int trianglesLeftOfPlane(const Mesh& m) {
+  int n = 0;
+  for (int t = 0; t < m.triangleSlots(); ++t) {
+    const Triangle& tri = m.triangle(t);
+    if (!tri.active) continue;
+    float x = 0;
+    for (int v : tri.v) x += m.vertex(v).pos.x;
+    n += x / 3 < 0;
+  }
+  return n;
+}
 
 void testFile(const std::string& path) {
   std::printf("%s\n", path.c_str());
@@ -146,6 +200,67 @@ void testFile(const std::string& path) {
     }
   }
 
+  {  // symmetry off and on again
+    Mesh m = base;
+    for (int v = 0; v < m.vertexSlots(); ++v)
+      if (m.vertex(v).active) m.vertex(v).weight = 0.5f;
+    if (sym) {
+      int planeMax = 0;
+      Mesh limited = m;
+      const int collapses = limitPlaneValence(limited);
+      for (int v = 0; v < limited.vertexSlots(); ++v)
+        if (limited.vertex(v).active && limited.vertex(v).onSymmetryPlane)
+          planeMax = std::max(planeMax, limited.vertex(v).numEdges);
+      std::printf("  plane valence: %d collapses, max plane valence %d\n", collapses, planeMax);
+      check(planeMax <= 10, "plane valence: at most 10 edges per plane vertex");
+      checkMesh(limited, true, before, "plane valence");
+
+      check(symmetryOff(m), "symmetry off: mirrored");
+      checkMesh(m, false, before, "symmetry off");
+      bool flagsCleared = !m.symmetric;
+      for (int v = 0; v < m.vertexSlots(); ++v) flagsCleared &= !m.vertex(v).onSymmetryPlane;
+      check(flagsCleared && maskCleared(m), "symmetry off: no plane flags, mask cleared");
+      check(mirrorSymmetric(m), "symmetry off: every vertex has its mirror image");
+      const int full = m.numTriangles();
+      const int converted = symmetryOn(m);
+      std::printf("  symmetry: %d -> %d -> %d triangles, %d quads converted\n", base.numTriangles(), full,
+                  m.numTriangles(), converted);
+      checkMesh(m, true, before, "symmetry on again");
+      {  // detail sculpted on the -x side of the full mesh is gone after the cut
+        Mesh full2 = base;
+        symmetryOff(full2);
+        Mesh plain = full2;
+        Vec3 c;
+        const float extent = length(bboxDiagonal(full2, &c));
+        for (int v = 0; v < full2.vertexSlots(); ++v) {
+          Vertex& vx = full2.vertex(v);
+          if (vx.active && vx.pos.x < -0.05f * extent) vx.pos += vx.normal * (0.01f * extent);
+        }
+        symmetryOn(full2);
+        symmetryOn(plain);
+        bool same = full2.numTriangles() == plain.numTriangles() && full2.vertexSlots() == plain.vertexSlots();
+        for (int v = 0; same && v < full2.vertexSlots(); ++v)
+          same = full2.vertex(v).active == plain.vertex(v).active &&
+                 (!full2.vertex(v).active || full2.vertex(v).pos == plain.vertex(v).pos);
+        check(same, "symmetry on: asymmetric detail on the -x side is discarded");
+      }
+      // A stored half may hold a few triangles left of the plane; the cut drops them.
+      check(m.symmetric && trianglesLeftOfPlane(m) == 0 && full == 2 * base.numTriangles() &&
+                m.numTriangles() == base.numTriangles() - trianglesLeftOfPlane(base),
+            "symmetry on again: the +x half, less the stored triangles left of the plane (" +
+                std::to_string(trianglesLeftOfPlane(base)) + ")");
+    } else {
+      const int converted = symmetryOn(m);
+      std::string why;
+      check(m.validate(&why), "symmetry on: invariants" + (why.empty() ? "" : " (" + why + ")"));
+      check(m.symmetric && planeIsExact(m) && trianglesLeftOfPlane(m) == 0 && maskCleared(m),
+            "symmetry on: +x half, plane exact, mask cleared");
+      std::printf("  symmetry on: %d -> %d triangles, %d quads converted\n", base.numTriangles(), m.numTriangles(),
+                  converted);
+      check(symmetryOff(m) && m.validate(&why), "symmetry off again: valid");
+    }
+  }
+
   {  // beautify on everything
     Mesh m = base;
     for (int v = 0; v < m.vertexSlots(); ++v)
@@ -192,6 +307,25 @@ void testQuadCube() {
     }
     check(paired && diagonals == 24, std::string(op) + ": all faces are marked quads with their diagonal");
   }
+
+  // Centered on the plane: the four faces along x are cut in two, the faces
+  // at x = +-0.5 keep or lose their quad as a whole.
+  Mesh c = m;
+  for (int v = 0; v < c.vertexSlots(); ++v) c.vertex(v).pos.x -= 0.5f;
+  c.updateGeometry();
+  const int converted = symmetryOn(c);
+  std::string err;
+  check(c.validate(&err) && quadsCoherent(c) && planeIsExact(c) && trianglesLeftOfPlane(c) == 0,
+        "cube symmetry on: valid, quads coherent, plane exact (" + std::to_string(converted) + " quads converted)");
+  int quadsLeft = 0;
+  for (uint8_t q : c.quadMarkers) quadsLeft += q == 1;
+  check(converted > 0 && quadsLeft >= 1, "cube symmetry on: cut quads became triangles, the +x face stays a quad");
+  const Topology half = fullTopology(c, true);
+  check(symmetryOff(c), "cube symmetry off: mirrored");
+  checkMesh(c, false, half, "cube symmetry off");
+  int quadsAfter = 0;
+  for (uint8_t q : c.quadMarkers) quadsAfter += q == 1;
+  check(quadsCoherent(c) && quadsAfter == 2 * quadsLeft, "cube symmetry off: quads mirrored with their diagonals");
 }
 
 }  // namespace

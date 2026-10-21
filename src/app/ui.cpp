@@ -21,6 +21,7 @@ namespace bh::viewer {
 namespace {
 
 bool paintModeQuestion = false;  // open the "Enter paint mode?" dialog next frame
+int symmetryQuestion = -1;       // open the symmetry dialog next frame: 1 on, 0 off
 bool showKeys = false;
 
 struct ToolButton {
@@ -78,6 +79,7 @@ void menuBar() {
     ImGui::Separator();
     if (ImGui::MenuItem("Subdivide", "Ctrl+D", false, !app.paintMode)) subdivideAll();
     if (ImGui::MenuItem("Reduce all", "Ctrl+Y", false, !app.paintMode)) reduceAll();
+    if (ImGui::MenuItem("Symmetry", nullptr, app.mesh.symmetric, !app.paintMode)) askSetSymmetry(!app.mesh.symmetric);
     ImGui::Separator();
     if (ImGui::MenuItem("Enter paint mode...", "Ctrl+P", false, !app.paintMode)) askEnterPaintMode();
     ImGui::EndMenu();
@@ -138,7 +140,8 @@ void sculptPanel(float width) {
 
   ImGui::SeparatorText("Mesh");
   ImGui::Checkbox("Beautify while sculpting", &app.beautify);
-  ImGui::TextDisabled("Symmetry: %s", app.mesh.symmetric ? "on (mirror at x = 0)" : "off");
+  bool symmetric = app.mesh.symmetric;
+  if (ImGui::Checkbox("Symmetry (mirror at x = 0)", &symmetric)) askSetSymmetry(symmetric);
   if (ImGui::Button("Subdivide", ImVec2(width / 2 - 4, 0))) subdivideAll();
   ImGui::SameLine();
   if (ImGui::Button("Reduce all", ImVec2(-1, 0))) reduceAll();
@@ -290,6 +293,33 @@ void dialogs() {
     ImGui::EndPopup();
   }
 
+  if (symmetryQuestion >= 0) {
+    ImGui::OpenPopup(symmetryQuestion ? "Turn symmetry on?" : "Turn symmetry off?");
+    symmetryQuestion = -1;
+  }
+  for (bool on : {true, false}) {
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(on ? "Turn symmetry on?" : "Turn symmetry off?", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize))
+      continue;
+    if (on) {
+      ImGui::TextUnformatted("The +x side is kept and mirrored to the -x side.");
+      ImGui::TextUnformatted("Whatever differs on the -x side is lost.");
+    } else {
+      ImGui::TextUnformatted("The mirrored half becomes part of the mesh, and both sides can differ.");
+      ImGui::TextUnformatted("Turning symmetry on again later cuts the -x side away.");
+    }
+    ImGui::TextDisabled("Undo (Ctrl+Z) brings the mesh back. The mask is cleared.");
+    ImGui::Spacing();
+    if (ImGui::Button(on ? "Turn on" : "Turn off", ImVec2(120 * ImGui::GetStyle().FontScaleDpi, 0))) {
+      setSymmetry(on);
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+
   if (showKeys) {
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::Begin("Mouse and keys", &showKeys, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
@@ -390,6 +420,10 @@ bool uiWantsKeyboard() { return ImGui::GetIO().WantTextInput || ImGui::IsPopupOp
 
 void askEnterPaintMode() {
   if (!app.paintMode) paintModeQuestion = true;
+}
+
+void askSetSymmetry(bool on) {
+  if (!app.paintMode && app.mesh.symmetric != on) symmetryQuestion = on ? 1 : 0;
 }
 
 }  // namespace bh::viewer

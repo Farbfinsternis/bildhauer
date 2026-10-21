@@ -95,7 +95,9 @@ Sculpt mode, keys as in Sculptris: D Draw, B Smooth, G Grab, C Inflate,
 F Flatten, V Pinch, M Mask, E Crease, R Rotate, T Scale, Y Reduce brush;
 pressing a tool key again toggles its option (Clay, Lock plane, Global).
 Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+P paint mode (asks first: it is one
-way, as in Sculptris).
+way, as in Sculptris). Symmetry is switched in the panel or the Edit menu:
+off mirrors the stored half into a full mesh, on keeps the +x side and drops
+what differs on the -x side (both undoable).
 
 Paint mode (files with paint data open in it): D Paint color, B Paint bump,
 F Flatten bump; with Shift `[` `]` change the hardness; N shows the bump
@@ -107,7 +109,7 @@ for it, C toggles Colored, A additive blending, H hides the layer. Matcap
 images named in a painted .sc1 are loaded from where the file says, if they
 exist.
 
-`--snapshot out.png [--demo] [--paint] [--bump-normals] [--save] [--no-ui]`
+`--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]`
 renders one frame (after a few demo strokes, in paint mode with paint strokes
 and a gold layer; --save saves as `<name>_bildhauer.sc1` first) and exits.
 
@@ -157,7 +159,7 @@ Implementation:
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
 | Viewer: matcap rendering, mirrored half, sculpting, undo, open/save | done (`src/app`) |
 | UI: menus, tool panel (sculpt and paint), colors, material layers, status bar | done (`src/app/ui`, Dear ImGui), first version |
-| Symmetry switching with plane-valence reduction | open |
+| Symmetry switching with plane-valence reduction | done (`src/core/symmetry`); on and off on all samples, quads kept; Sculpt panel and Edit menu |
 | Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
 | Paint mode: painting (color, bump, flatten), bump normals, tile undo | done (`src/core/paint`); formulas checked against paint.md, stored images load unchanged |
 | Paint mode: matcap shading with bump, material layers, saving paint data | done (`src/app`, `src/core/paint`, `src/io`); saved files load back identically and open in Sculptris Alpha 6 without visible differences (checked by hand 2026-10-21) |
