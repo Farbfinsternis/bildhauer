@@ -1,6 +1,6 @@
 // Paint mode: texel baking and the range query on every sample, then color,
 // bump and flatten dabs, normals, undo and symmetry against the formulas of
-// re/docs/paint.md 3; Fill/Clear; material masks; tangents; saving paint data (a stored
+// re/docs/paint.md 3; stamps (brush mask and texture); Fill/Clear; material masks; tangents; saving paint data (a stored
 // texturing block re-encodes byte-identically, painted canvases survive a
 // save and load); stored images of painted files load unchanged.
 //
@@ -110,6 +110,7 @@ void testDabs(const Mesh& m, const TextureMapping& map) {
     return;
   }
   const Vec3 p = tx.pos[c];
+  s.toViewer = tx.normal[c];  // the view looks straight at the spot
   const std::vector<uint32_t> before = canvas.colorImage();
   const std::vector<int32_t> heightsBefore = canvas.heights();
 
@@ -197,18 +198,23 @@ void testDabs(const Mesh& m, const TextureMapping& map) {
   if (m.symmetric) {
     // One texture for both halves: a dab on the mirror image paints the same.
     Canvas a(m, map, kSize, kSize), b(m, map, kSize, kSize);
+    PaintSettings mirrored = s;
+    mirrored.toViewer.x = -mirrored.toViewer.x;
     a.dab(p, s);
-    b.dab({-p.x, p.y, p.z}, s);
+    b.dab({-p.x, p.y, p.z}, mirrored);
     check(a.colorImage() == b.colorImage(), "symmetry: a mirrored dab paints the same texels");
     // A dab on the plane reaches both sides evenly.
-    Vec3 onPlane;
+    Vec3 onPlane, onPlaneNormal{0, 0, 1};
     for (size_t i = 0; i < tx.triangle.size(); ++i)
-      if (tx.triangle[i] >= 0 && std::fabs(tx.pos[i].x) < s.radius * 0.05f && tx.normal[i].z > 0.5f) {
+      if (tx.triangle[i] >= 0 && std::fabs(tx.pos[i].x) < s.radius * 0.05f) {
         onPlane = tx.pos[i];
+        onPlaneNormal = tx.normal[i];
         break;
       }
     Canvas plane(m, map, kSize, kSize);
-    plane.dab(onPlane, s);
+    PaintSettings front = s;
+    front.toViewer = onPlaneNormal;
+    plane.dab(onPlane, front);
     int painted = 0;
     for (size_t i = 0; i < tx.triangle.size(); ++i) painted += plane.colorImage()[i] != before[i];
     check(painted > 0, "symmetry: a dab on the plane paints");
@@ -226,6 +232,7 @@ void testMasks(const Mesh& m, const TextureMapping& map) {
   s.hardness = 1.0f;
   const int c = centerTexel(m, tx, s.radius * 1.3f);
   if (c < 0) return;
+  s.toViewer = tx.normal[c];
   check(canvas.material(0).used && canvas.material(0).mask[c] == 255, "masks: slot 0 covers everything");
   const int slot = canvas.addLayer("layer");
   check(slot == 1 && canvas.material(1).mask[c] == 0, "masks: a new layer starts empty");
@@ -243,6 +250,128 @@ void testMasks(const Mesh& m, const TextureMapping& map) {
   canvas.undo();
   check(canvas.material(slot).mask[c] == 0 && canvas.takeChangedMasks() == 1u << slot,
         "masks: undo restores the mask");
+}
+
+void testStampBasics() {
+  std::printf("stamps\n");
+  const Stamp quad{2, 2, {0xFF000000u, 0xFF0000FFu, 0xFF00FF00u, 0xFFFF0000u}};
+  check(quad.sample(0, 0) == 0xFF000000u && quad.sample(1, 0) == 0xFF0000FFu && quad.sample(0, 1) == 0xFF00FF00u &&
+            quad.sample(1, 1) == 0xFFFF0000u,
+        "stamp: corners sample their pixels (row 0 at v = 0)");
+  check(quad.sample(0.5f, 0.5f) == 0xFF404040u, "stamp: the center is the bilinear mean");
+  check(quad.sample(-1, 2) == quad.sample(0, 1), "stamp: u and v are clamped");
+
+  const Stamp gray = grayStamp({1, 1, {0x80FF8040u}});  // A 128, B 255, G 128, R 64
+  const uint32_t g = (2 * 64 + 3 * 128 + 255) / 6;
+  check(gray.rgba[0] == ((((128 + 1) * g) >> 8) << 24 | 0xFFFFFFu), "stamp: gray = (2R + 3G + B) / 6, times alpha");
+
+  // A mask that is opaque on the left half only.
+  Stamp mask{4, 1, {0xFFFFFFFFu, 0xFFFFFFFFu, 0x00FFFFFFu, 0x00FFFFFFu}};
+  Stamps st = buildStamps(nullptr, &mask, false);
+  check(st.color.width == 4 && (st.color.rgba[0] >> 24) == 255 && (st.color.rgba[3] >> 24) == 0 &&
+            (st.color.rgba[0] & 0xFFFFFF) == 0xFFFFFF,
+        "stamps: without a texture white, shaped by the mask");
+  Stamps inv = buildStamps(nullptr, &mask, true);
+  check((inv.color.rgba[0] >> 24) == 0 && (inv.color.rgba[3] >> 24) == 255, "stamps: an inverted mask");
+  const Stamp texture{1, 1, {0xFF20C040u}};
+  Stamps tex = buildStamps(&texture, nullptr, false);
+  check(tex.color.rgba[0] == 0xFF20C040u && (tex.bump.rgba[0] & 0xFFFFFF) == 0xFFFFFF,
+        "stamps: the texture as is for color, gray for bump");
+
+  const StampFrame f = fixedStampFrame({0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 0);
+  check(length(f.a - Vec3{1, 0, 0}) < 1e-6f && length(f.b - Vec3{0, -1, 0}) < 1e-6f && f.n == Vec3(0, 0, 1),
+        "frame: at angle 0 the stamp stands upright in the screen plane");
+  const StampFrame q = fixedStampFrame({0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.14159265f / 2);
+  check(length(q.b - Vec3{1, 0, 0}) < 1e-5f, "frame: the angle turns it");
+  const StampFrame d = directedStampFrame({0, 0, 1}, {3, 4, 5});
+  check(length(d.b - Vec3{0.6f, 0.8f, 0}) < 1e-5f && std::fabs(dot(d.a, d.b)) < 1e-6f && std::fabs(dot(d.a, d.n)) < 1e-6f,
+        "frame: a direction is projected into the screen plane");
+}
+
+void testStampDabs(const Mesh& m, const TextureMapping& map) {
+  Vec3 center;
+  const float diag = length(bboxDiagonal(m, &center));
+  Canvas probe(m, map, kSize, kSize);
+  const Texels& tx = probe.texels();
+  PaintSettings s;
+  s.radius = diag * 0.04f;
+  s.strength = 1.97f;
+  s.hardness = 1.0f;
+  const int c = centerTexel(m, tx, s.radius * 1.3f);
+  if (c < 0) return;
+  const Vec3 p = tx.pos[c];
+  s.toViewer = tx.normal[c];
+  s.frame = directedStampFrame(s.toViewer, cross(s.toViewer, {0, 1, 0}).x != 0 ? Vec3{0, 1, 0} : Vec3{1, 0, 0});
+  const std::vector<uint32_t> before = probe.colorImage();
+  auto changed = [&](const Canvas& cv) {
+    int n = 0;
+    for (size_t i = 0; i < before.size(); ++i) n += cv.colorImage()[i] != before[i];
+    return n;
+  };
+
+  // A white stamp paints the full color at the center.
+  const Stamps white = buildStamps(nullptr, nullptr, false);
+  s.stamps = &white;
+  Canvas a(m, map, kSize, kSize);
+  a.dab(p, s);
+  check(sameColor(a.colorImage()[c], s.primary, 1) && changed(a) > 10, "stamp dab: a white stamp paints like a full dab");
+
+  // A mask opaque on one side (u < 0.5) leaves the other side alone.
+  Stamp halfMask{8, 1, {}};
+  for (int x = 0; x < 8; ++x) halfMask.rgba.push_back(x < 4 ? 0xFFFFFFFFu : 0x00FFFFFFu);
+  const Stamps half = buildStamps(nullptr, &halfMask, false);
+  s.stamps = &half;
+  Canvas b(m, map, kSize, kSize);
+  b.dab(p, s);
+  int left = 0, right = 0;
+  for (size_t i = 0; i < before.size(); ++i) {
+    if (b.colorImage()[i] == before[i]) continue;
+    const float u = dot(tx.pos[i] - p, s.frame.a) / (3 * s.radius);  // 0 at the center
+    if (u < -0.3f) ++left;
+    if (u > 0.3f) ++right;  // beyond the blend of the mask edge
+  }
+  check(left > 10 && right == 0, "stamp dab: the mask keeps one side unpainted (" + std::to_string(left) + " / " +
+                                     std::to_string(right) + ")");
+
+  // Brush texture: its colors are painted.
+  const Stamp green{1, 1, {0xFF20C040u}};
+  const Stamps tex = buildStamps(&green, nullptr, false);
+  s.stamps = &tex;
+  s.stampTexture = true;
+  Canvas t(m, map, kSize, kSize);
+  t.dab(p, s);
+  check(sameColor(t.colorImage()[c], 0x20C040u, 1), "stamp dab: the brush texture's color is painted");
+  s.stampTexture = false;
+
+  // Bump: the stamp's gray value scales the height.
+  const Stamp mid{1, 1, {0xFF808080u}};
+  const Stamps midStamps = buildStamps(&mid, nullptr, false);
+  PaintSettings bump = s;
+  bump.tool = PaintTool::Bump;
+  bump.stamps = &midStamps;
+  Canvas h(m, map, kSize, kSize);
+  h.dab(p, bump);
+  const int64_t alpha = midStamps.bump.rgba[0] >> 24;
+  const int64_t expect = std::lround(alpha / 255.0f * 24576) * 255 / 256;
+  check(int64_t(h.heights()[c]) - kNeutralHeight == expect,
+        "stamp dab: bump scales with the stamp's gray (" + std::to_string(int64_t(h.heights()[c]) - kNeutralHeight) +
+            ", expected " + std::to_string(expect) + ")");
+
+  // Depth: the stamp reaches 0.45 r along its normal (fully up to 0.3 r).
+  s.stamps = &white;
+  int tooDeep = 0, painted = 0;
+  for (float lift : {0.2f, 0.6f}) {
+    Canvas cv(m, map, kSize, kSize);
+    const Vec3 c2 = p + s.frame.n * (lift * s.radius);
+    cv.dab(c2, s);
+    for (size_t i = 0; i < before.size(); ++i) {
+      if (cv.colorImage()[i] == before[i]) continue;
+      ++painted;
+      if (std::fabs(dot(tx.pos[i] - c2, s.frame.n)) > 0.45f * s.radius * 1.001f) ++tooDeep;
+    }
+  }
+  check(painted > 10 && tooDeep == 0, "stamp dab: only texels within 0.45 r along the stamp normal (" +
+                                          std::to_string(painted) + " painted)");
 }
 
 void testFill(const Mesh& m, const TextureMapping& map) {
@@ -281,6 +410,7 @@ void testFill(const Mesh& m, const TextureMapping& map) {
   bump.tool = PaintTool::Bump;
   bump.radius = length(bboxDiagonal(m, &center)) * 0.05f;
   bump.strength = 1.97f;
+  bump.toViewer = tx.normal[c];
   canvas.dab(tx.pos[c], bump);
   canvas.dab(tx.pos[c], bump);
   const int64_t h0 = int64_t(canvas.heights()[c]) - kNeutralHeight;
@@ -343,6 +473,7 @@ void testSave(const Mesh& m, const TextureMapping& map, const Sc1File& original)
   s.radius = diag * 0.05f;
   const int c = centerTexel(m, tx, s.radius * 1.3f);
   if (c < 0) return;
+  s.toViewer = tx.normal[c];
   canvas.dab(tx.pos[c], s);
   s.tool = PaintTool::Bump;
   canvas.dab(tx.pos[c], s);
@@ -409,6 +540,7 @@ void testFile(const std::string& path) {
   testGrid(m, canvas.texels());
   testDabs(m, map);
   testFill(m, map);
+  testStampDabs(m, map);
   testMasks(m, map);
   testTangents(m, map);
   testSave(m, map, file);
@@ -446,6 +578,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "usage: paint_test <file.sc1>...\n");
     return 2;
   }
+  testStampBasics();
   for (int i = 1; i < argc; ++i) testFile(argv[i]);
   std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");
   return failures ? 1 : 0;

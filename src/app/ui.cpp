@@ -149,6 +149,73 @@ void sculptPanel(float width) {
   if (ImGui::Button("Enter paint mode...", ImVec2(-1, 0))) askEnterPaintMode();
 }
 
+// The stamp the current tool samples, as a texture for the preview.
+GLuint stampPreview(float& aspect) {
+  static GLuint tex = 0;
+  static int version = -1;
+  static PaintTool tool = PaintTool::Color;
+  const PaintTool now = app.paint.tool == PaintTool::Color ? PaintTool::Color : PaintTool::Bump;
+  const Stamp& s = now == PaintTool::Color ? app.stamps.color : app.stamps.bump;
+  if (s.empty()) return 0;
+  aspect = float(s.height) / float(s.width);
+  if (tex && version == app.stampsVersion && tool == now) return tex;
+  if (!tex) glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s.width, s.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, s.rgba.data());
+  version = app.stampsVersion;
+  tool = now;
+  return tex;
+}
+
+// Brush mask and brush texture (paint.md 3.6) and how the stamp turns.
+void stampPanel() {
+  ImGui::SeparatorText("Stamp");
+  bool changed = false;
+  auto imageRow = [&](const char* label, bool& on, const std::string& path, bool mask) {
+    ImGui::PushID(label);
+    if (ImGui::Checkbox(label, &on)) {
+      const bool loaded = !(mask ? app.maskImage : app.textureImage).empty();
+      if (on && !loaded && !chooseStampImage(mask)) on = false;
+      changed = true;
+    }
+    ImGui::SameLine();
+    const std::string name = path.empty() ? std::string("Image...") : fileName(path);
+    if (ImGui::Button(name.c_str(), ImVec2(-1, 0))) chooseStampImage(mask);
+    if (!path.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", path.c_str());
+    ImGui::PopID();
+  };
+  imageRow("Brush mask", app.maskOn, app.maskPath, true);
+  if (ImGui::Checkbox("Invert mask", &app.maskInvert)) changed = true;
+  imageRow("Brush texture", app.textureOn, app.texturePath, false);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Paint color paints the texture's colors, the bump tools its brightness");
+
+  int mode = int(app.stampMode);
+  ImGui::RadioButton("Fixed", &mode, int(StampMode::Fixed));
+  ImGui::SameLine();
+  ImGui::RadioButton("Directional", &mode, int(StampMode::Directional));
+  ImGui::SameLine();
+  ImGui::RadioButton("Random", &mode, int(StampMode::Random));
+  app.stampMode = StampMode(mode);
+  if (app.stampMode == StampMode::Fixed) ImGui::SliderFloat("Angle", &app.stampAngle, -180, 180, "%.0f\xC2\xB0");
+  if (changed) rebuildStamps();
+
+  if (!stampsActive()) {
+    ImGui::TextDisabled("No stamp: enable a mask or a texture");
+    return;
+  }
+  float aspect = 1;
+  if (GLuint tex = stampPreview(aspect)) {
+    const float side = ImGui::GetFrameHeight() * 4;
+    ImGui::Image(ImTextureRef(ImTextureID(intptr_t(tex))), ImVec2(side, side * aspect));
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s stamp", app.paint.tool == PaintTool::Color ? "Color" : "Bump");
+  }
+}
+
 void materialPanel() {
   Canvas& cv = *app.canvas;
   ImGui::SeparatorText("Materials");
@@ -236,6 +303,7 @@ void paintPanel(float width) {
   ImGui::SameLine();
   if (ImGui::SmallButton("Swap")) std::swap(app.paint.primary, app.paint.secondary);
 
+  stampPanel();
   materialPanel();
 
   ImGui::SeparatorText("View");

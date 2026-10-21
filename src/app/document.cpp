@@ -7,6 +7,7 @@
 
 #include "app/app.h"
 #include "app/dialogs.h"
+#include "app/images.h"
 #include "app/matcaps.h"
 #include "core/reduce.h"
 #include "core/relax.h"
@@ -287,6 +288,42 @@ void fillLayer(bool invert) {
 const char* fillLabel() {
   if (app.paint.tool != PaintTool::Color) return "Clear bump";
   return app.editSlot > 0 ? "Fill layer mask" : "Fill color";
+}
+
+bool chooseStampImage(bool mask) {
+  std::string path = openFileDialog(app.hwnd, kImageFilter);
+  return !path.empty() && loadStampImage(path, mask);
+}
+
+bool loadStampImage(const std::string& path, bool mask) {
+  Image image;
+  std::string err;
+  if (!loadImage(path, image, &err)) {
+    app.status = err;
+    return false;
+  }
+  Stamp stamp{image.width, image.height, std::move(image.rgba)};
+  if (mask) {
+    app.maskImage = grayStamp(stamp);
+    app.maskPath = path;
+    app.maskOn = true;
+  } else {
+    app.textureImage = std::move(stamp);
+    app.texturePath = path;
+    app.textureOn = true;
+  }
+  rebuildStamps();
+  return true;
+}
+
+void rebuildStamps() {
+  const bool mask = app.maskOn && !app.maskImage.empty(), texture = app.textureOn && !app.textureImage.empty();
+  app.stamps = buildStamps(texture ? &app.textureImage : nullptr, mask ? &app.maskImage : nullptr, app.maskInvert);
+  ++app.stampsVersion;
+}
+
+bool stampsActive() {
+  return (app.maskOn && !app.maskImage.empty()) || (app.textureOn && !app.textureImage.empty());
 }
 
 std::string nextBuiltinMatcap(const std::string& current) {

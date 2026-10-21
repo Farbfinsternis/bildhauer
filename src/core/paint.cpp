@@ -141,6 +141,85 @@ void TexelGrid::query(const Vec3& c, float radius, std::vector<int>& out) const 
       }
 }
 
+// --- stamps -------------------------------------------------------------------
+
+uint32_t Stamp::sample(float u, float v) const {
+  if (empty()) return 0xFFFFFFFFu;
+  const float x = std::clamp(u, 0.0f, 1.0f) * (width - 1), y = std::clamp(v, 0.0f, 1.0f) * (height - 1);
+  const int x0 = std::min(int(x), std::max(width - 2, 0)), y0 = std::min(int(y), std::max(height - 2, 0));
+  const int x1 = std::min(x0 + 1, width - 1), y1 = std::min(y0 + 1, height - 1);
+  const float fx = x - x0, fy = y - y0;
+  const uint32_t p00 = rgba[size_t(y0) * width + x0], p10 = rgba[size_t(y0) * width + x1];
+  const uint32_t p01 = rgba[size_t(y1) * width + x0], p11 = rgba[size_t(y1) * width + x1];
+  uint32_t out = 0;
+  for (int c = 0; c < 32; c += 8) {
+    auto ch = [c](uint32_t p) { return float(p >> c & 0xFF); };
+    const float top = ch(p00) + (ch(p10) - ch(p00)) * fx, bottom = ch(p01) + (ch(p11) - ch(p01)) * fx;
+    out |= uint32_t(std::lround(top + (bottom - top) * fy)) << c;
+  }
+  return out;
+}
+
+Stamp grayStamp(const Stamp& image) {
+  Stamp out = image;
+  for (uint32_t& p : out.rgba) {
+    const uint32_t gray = (2 * (p & 0xFF) + 3 * (p >> 8 & 0xFF) + (p >> 16 & 0xFF)) / 6;
+    p = (((p >> 24) + 1) * gray >> 8) << 24 | 0xFFFFFFu;
+  }
+  return out;
+}
+
+namespace {
+
+// Bilinear resampling to w x h, pixel x at u = x / w as in Sculptris.
+Stamp resampled(const Stamp& s, int w, int h) {
+  Stamp out{w, h, std::vector<uint32_t>(size_t(w) * h)};
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x) out.rgba[size_t(y) * w + x] = s.sample(float(x) / w, float(y) / h);
+  return out;
+}
+
+void applyMask(Stamp& s, const Stamp& mask, bool invert) {
+  if (mask.width + mask.height > s.width + s.height) s = resampled(s, mask.width, mask.height);
+  for (int y = 0; y < s.height; ++y)
+    for (int x = 0; x < s.width; ++x) {
+      uint32_t& p = s.rgba[size_t(y) * s.width + x];
+      uint32_t m = mask.sample(float(x) / s.width, float(y) / s.height) >> 24;
+      if (invert) m = 255 - m;
+      p = (((m + 1) * (p >> 24)) >> 8) << 24 | (p & 0xFFFFFFu);
+    }
+}
+
+}  // namespace
+
+Stamps buildStamps(const Stamp* texture, const Stamp* mask, bool invertMask) {
+  const Stamp white{1, 1, {0xFFFFFFFFu}};
+  Stamps out;
+  const bool textured = texture && !texture->empty();
+  out.color = textured ? *texture : white;
+  out.bump = textured ? grayStamp(*texture) : white;
+  if (mask && !mask->empty()) {
+    applyMask(out.color, *mask, invertMask);
+    applyMask(out.bump, *mask, invertMask);
+  }
+  return out;
+}
+
+StampFrame fixedStampFrame(const Vec3& toViewer, const Vec3& screenRight, const Vec3& screenUp, float angle) {
+  const Vec3 n = normalize(toViewer);
+  return directedStampFrame(n, screenRight * std::sin(angle) - screenUp * std::cos(angle));
+}
+
+StampFrame directedStampFrame(const Vec3& toViewer, const Vec3& direction) {
+  StampFrame f;
+  f.n = normalize(toViewer);
+  Vec3 b = normalize(direction - f.n * dot(f.n, direction));
+  if (length(b) == 0) b = normalize(cross(f.n, std::fabs(f.n.x) < 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0}));
+  f.b = b;
+  f.a = cross(f.n, b);  // screen-right when b is screen-down
+  return f;
+}
+
 // --- canvas -------------------------------------------------------------------
 
 const char* paintToolName(PaintTool tool) {
@@ -236,6 +315,8 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
   const float reach = 1.3f * r;
   const float k = std::copysign(std::min(1.0f, 0.6f * std::fabs(s.strength)), s.strength);
   const float hard = s.hardness * s.hardness * 0.95f;
+  const Stamp* stamp = s.stamps ? (s.tool == PaintTool::Color ? &s.stamps->color : &s.stamps->bump) : nullptr;
+  if (stamp && stamp->empty()) stamp = nullptr;
 
   found_.clear();
   grid_.query(center, reach, found_);
@@ -247,33 +328,30 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
   hits_.clear();
   hitX_.clear();
   hitN_.clear();
-  Vec3 mean;
+  hitE_.clear();
   for (int i : found_) {
     if (seen_[i] == dabStamp_) continue;
     seen_[i] = dabStamp_;
-    const Vec3& p = texels_.pos[i];
-    float d = length(p - center);
-    Vec3 n = texels_.normal[i];
-    if (symmetric_) {
-      float dm = length(mirrorX(p) - center);
-      if (dm < d) {
-        d = dm;
-        n = mirrorX(n);
-      }
+    // The texel where it is seen: its own position or its mirror image.
+    Vec3 p = texels_.pos[i], n = texels_.normal[i];
+    if (symmetric_ && length(mirrorX(p) - center) < length(p - center)) {
+      p = mirrorX(p);
+      n = mirrorX(n);
     }
+    const float d = length(p - center);
     if (d > reach) continue;
-    const float x = 2 * d / (3 * r);
     hits_.push_back(i);
-    hitX_.push_back(x);
+    hitX_.push_back(2 * d / (3 * r));
     hitN_.push_back(n);
-    mean += n * (1 - x);
+    hitE_.push_back(p - center);
   }
-  // Stamp normal for the surface angle falloff: the mean texel normal.
-  const Vec3 stampN = normalize(mean);
-  const bool angle = s.angleFalloff && length(stampN) > 0;
+  // The stamp normal faces the viewer; the angle falloff measures against it.
+  const Vec3 toViewer = normalize(s.toViewer);
+  const bool angle = (s.angleFalloff || stamp) && length(toViewer) > 0;
+  const StampFrame& fr = s.frame;
+  const float stampScale = 1 / (3 * r);  // the stamp covers +-1.5 r
 
-  const uint32_t target = k > 0 ? s.primary : s.secondary;
-  const int64_t t16[3] = {(target & 0xFF) * 257, (target >> 8 & 0xFF) * 257, (target >> 16 & 0xFF) * 257};
+  const uint32_t paintTarget = k > 0 ? s.primary : s.secondary;
   const int64_t alpha16 = std::lround(std::fabs(k) * 255) * 257;
   const int slot = s.tool == PaintTool::Color && s.target > 0 && s.target < kMaxMaterials &&
                            materials_[s.target].used ? s.target : 0;
@@ -288,36 +366,52 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
   for (size_t h = 0; h < hits_.size(); ++h) {
     float f = 1;
     if (hard < 1) f = smoothFalloff((1 - hitX_[h]) / (1 - hard));
+    // A stamp replaces k: its alpha and the depth term m set the amount.
+    uint32_t sample = 0xFFFFFFFFu;
+    float m = 1;
+    if (stamp) {
+      const Vec3& e = hitE_[h];
+      const float u = dot(e, fr.a) * stampScale + 0.5f, v = dot(e, fr.b) * stampScale + 0.5f;
+      if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+      const float q = (0.15f - std::fabs(dot(e, fr.n)) * stampScale) / 0.05f;
+      if (q <= 0) continue;
+      m = std::clamp(q * std::fabs(k), 1.0f / 128, 1.0f);
+      sample = stamp->sample(u, v);
+    }
     if (angle) {
-      const float a = (dot(hitN_[h], stampN) - 0.15f) * 3;
+      const float a = (dot(hitN_[h], toViewer) - 0.15f) * 3;
       if (a < 0) continue;
       if (a < 1) f *= a;
     }
     if (f <= 0) continue;
     const int i = hits_[h];
     touchTile(tileOf(i), slot);
+    const int64_t stampAlpha = sample >> 24;
     switch (s.tool) {
       case PaintTool::Color: {
-        const int64_t amount = (alpha16 * std::lround(f * 32768)) >> 15;
+        const int64_t amount = stamp ? (stampAlpha * 257 * std::lround(f * m * 32768)) >> 15
+                                     : (alpha16 * std::lround(f * 32768)) >> 15;
         if (slot > 0) {
           const int64_t goal = k > 0 ? 65535 : 0;
           mask16[i] = uint16_t(mask16[i] + (((goal - mask16[i]) * amount) >> 16));
           mask[i] = uint8_t(mask16[i] >> 8);
           break;
         }
+        const uint32_t target = stamp && s.stampTexture ? sample : paintTarget;
+        const int64_t t16[3] = {(target & 0xFF) * 257, (target >> 8 & 0xFF) * 257, (target >> 16 & 0xFF) * 257};
         uint16_t* ch[3] = {&r16_[i], &g16_[i], &b16_[i]};
         for (int c = 0; c < 3; ++c) *ch[c] = uint16_t(*ch[c] + (((t16[c] - *ch[c]) * amount) >> 16));
         color_[i] = (color_[i] & 0xFF000000u) | uint32_t(r16_[i] >> 8) | uint32_t(g16_[i] >> 8) << 8 |
                     uint32_t(b16_[i] >> 8) << 16;
         break;
       }
-      case PaintTool::Bump: {
-        const int64_t v = heights_[i] + int64_t(std::lround(f * k * 24576)) * 255 / 256;
-        heights_[i] = int32_t(std::clamp<int64_t>(v, 0, INT32_MAX));
-        break;
-      }
+      case PaintTool::Bump:
       case PaintTool::FlattenBump: {
-        const int64_t v = heights_[i] + ((std::lround(f * k * 255) * (int64_t(kNeutralHeight) - heights_[i])) >> 8);
+        // With a stamp the sign of k is kept, so Ctrl still lowers.
+        const float amount = stamp ? std::copysign(stampAlpha / 255.0f * m * f, k) : f * k;
+        const int64_t v = s.tool == PaintTool::Bump
+                              ? heights_[i] + int64_t(std::lround(amount * 24576)) * 255 / 256
+                              : heights_[i] + ((std::lround(amount * 255) * (int64_t(kNeutralHeight) - heights_[i])) >> 8);
         heights_[i] = int32_t(std::clamp<int64_t>(v, 0, INT32_MAX));
         break;
       }
@@ -462,14 +556,36 @@ bool Canvas::undo() {
 // --- stroke -------------------------------------------------------------------
 
 PaintStroke::PaintStroke(Canvas& canvas, const PaintSettings& settings, const Vec3& start)
-    : canvas_(canvas), s_(settings), path_(start) {
+    : canvas_(canvas), s_(settings), path_(start), direction_(-settings.screenUp) {
   canvas_.beginUndoStep();
   moveTo(start, true);
 }
 
 void PaintStroke::moveTo(const Vec3& point, bool hit) {
   if (!hit) return;  // off the model: wait until the pointer is back
-  path_.moveTo(point, s_.spacingFactor * s_.radius, [&](const Vec3& q) { canvas_.dab(q, s_); });
+  path_.moveTo(point, s_.spacingFactor * s_.radius, [&](const Vec3& q) { dab(q); });
+}
+
+void PaintStroke::dab(const Vec3& c) {
+  if (s_.stamps) {
+    switch (s_.stampMode) {
+      case StampMode::Fixed:
+        s_.frame = fixedStampFrame(s_.toViewer, s_.screenRight, s_.screenUp, s_.stampAngle);
+        break;
+      case StampMode::Directional:
+        if (hasLastDab_ && length(c - lastDab_) > 0) direction_ += ((c - lastDab_) - direction_) * 0.3f;
+        s_.frame = directedStampFrame(s_.toViewer, direction_);
+        break;
+      case StampMode::Random: {
+        std::uniform_real_distribution<float> d(-0.5f, 0.5f);
+        s_.frame = directedStampFrame(s_.toViewer, {d(random_), d(random_), d(random_)});
+        break;
+      }
+    }
+  }
+  lastDab_ = c;
+  hasLastDab_ = true;
+  canvas_.dab(c, s_);
 }
 
 }  // namespace bh

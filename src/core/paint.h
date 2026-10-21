@@ -17,13 +17,16 @@
 // are clamped to [0, 2^31) instead of wrapping; with symmetry (one texture for
 // both halves) a texel is painted from the nearer of its two images; bump
 // normals ignore neighbors outside the charts. Material slots (paint.md
-// 4.2) keep a mask per layer, painted like the color layer. Not yet
-// implemented: brush mask/texture, heightmask, paint mask, Combine color and
-// bump, Airbrush.
+// 4.2) keep a mask per layer, painted like the color layer. Stamps (brush
+// mask and texture, 3.6) follow Sculptris, except that with a stamp a
+// negative strength still lowers the bump and m uses |k| (Sculptris clamps a
+// negative k to the minimum). Not yet implemented: heightmask, paint mask,
+// Combine color and bump, Airbrush.
 
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -66,6 +69,41 @@ enum class PaintTool : int { Color, Bump, FlattenBump };
 
 const char* paintToolName(PaintTool tool);
 
+// A stamp image (paint.md 3.6): rows from the top, pixels 0xAABBGGRR.
+struct Stamp {
+  int width = 0, height = 0;
+  std::vector<uint32_t> rgba;
+
+  bool empty() const { return rgba.empty(); }
+  // Bilinear, with u and v clamped to [0, 1]; (0, 0) is the top left pixel.
+  uint32_t sample(float u, float v) const;
+};
+
+// A brush mask as loaded: white, alpha = the image's gray value
+// (2R + 3G + B) / 6 times its alpha.
+Stamp grayStamp(const Stamp& image);
+
+// What the color and the bump tools sample: the brush texture (as is, or
+// made gray for the bump), or white without one; with a brush mask its
+// alpha (inverted if asked) multiplies the stamp's.
+struct Stamps {
+  Stamp color, bump;
+};
+Stamps buildStamps(const Stamp* texture, const Stamp* mask, bool invertMask);
+
+// The stamp's frame (paint.md 3.2): a and b span it, n faces the viewer.
+struct StampFrame {
+  Vec3 a{1, 0, 0}, b{0, -1, 0}, n{0, 0, 1};
+};
+
+// Fixed in the screen plane: b is screen-down turned by `angle` (radians),
+// so the image stands upright at angle 0.
+StampFrame fixedStampFrame(const Vec3& toViewer, const Vec3& screenRight, const Vec3& screenUp, float angle);
+// b along `direction`, projected into the screen plane.
+StampFrame directedStampFrame(const Vec3& toViewer, const Vec3& direction);
+
+enum class StampMode : int { Fixed, Directional, Random };
+
 struct PaintSettings {
   PaintTool tool = PaintTool::Color;
   float radius = 0.1f;    // world units
@@ -79,6 +117,15 @@ struct PaintSettings {
   // instead ("Edit material mask"), the primary color showing the layer,
   // the secondary (Ctrl) hiding it.
   int target = 0;
+
+  // The view: the stamp normal and the angle falloff face `toViewer`.
+  Vec3 toViewer{0, 0, 1}, screenRight{1, 0, 0}, screenUp{0, 1, 0};
+  // Brush mask and brush texture; null paints without a stamp.
+  const Stamps* stamps = nullptr;
+  bool stampTexture = false;  // "Brush texture": the color stamp's colors are the target
+  StampMode stampMode = StampMode::Fixed;
+  float stampAngle = 0;       // radians, for StampMode::Fixed
+  StampFrame frame;           // per dab, set by PaintStroke
 };
 
 // Material slot (paint.md 4.2). Slot 0 is the base material and covers the
@@ -180,9 +227,12 @@ class Canvas {
   uint32_t dabStamp_ = 0;
   std::vector<int> found_, hits_;
   std::vector<float> hitX_;
-  std::vector<Vec3> hitN_;
+  std::vector<Vec3> hitN_, hitE_;  // visible normal, offset from the dab center
 };
 
+// Places the dabs of a stroke and gives each its stamp frame: fixed,
+// following the stroke (the direction eases toward each move by 0.3), or
+// random per dab.
 class PaintStroke {
  public:
   // `start` is the picked visible point. Opens an undo step.
@@ -191,9 +241,14 @@ class PaintStroke {
   void setRadius(float radius) { s_.radius = radius; }
 
  private:
+  void dab(const Vec3& c);
+
   Canvas& canvas_;
   PaintSettings s_;
   DabPath path_;
+  Vec3 direction_, lastDab_;
+  bool hasLastDab_ = false;
+  std::mt19937 random_{12345};
 };
 
 }  // namespace bh

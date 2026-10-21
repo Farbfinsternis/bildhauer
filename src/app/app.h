@@ -73,6 +73,15 @@ struct App {
   std::vector<Tangent> tangents;                       // per texvert
   int editSlot = 0;  // what Paint color paints: 0 the color layer, n the mask of material slot n
   bool showBumpNormals = false;
+  // Brush mask and brush texture (paint.md 3.6) as loaded (the mask already
+  // gray), and the stamps built from them; stampsVersion counts rebuilds.
+  Stamp maskImage, textureImage;
+  std::string maskPath, texturePath;
+  bool maskOn = false, maskInvert = false, textureOn = false;
+  StampMode stampMode = StampMode::Fixed;
+  float stampAngle = 0;  // degrees
+  Stamps stamps;
+  int stampsVersion = 0;
   bool uploadAll = false;  // the canvas is new: upload whole textures
   GLuint colorTex = 0, normalTex = 0;
   struct SlotTextures {

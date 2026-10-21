@@ -146,6 +146,14 @@ void beginPaintStroke(int mx, int my, bool invert) {
   s.strength = brushStrength(ps[1]) * (invert ? -1.0f : 1.0f);
   s.hardness = ps[2];
   s.target = app.editSlot;
+  // The view the stroke is painted from: stamp frame and angle falloff.
+  s.toViewer = -app.camera.forward();
+  s.screenRight = app.camera.right();
+  s.screenUp = app.camera.up();
+  s.stamps = stampsActive() ? &app.stamps : nullptr;
+  s.stampTexture = app.textureOn && !app.textureImage.empty();
+  s.stampMode = app.stampMode;
+  s.stampAngle = app.stampAngle * kPi / 180;
   app.paintStroke = std::make_unique<PaintStroke>(*app.canvas, s, in.point);
   app.modified = true;
 }

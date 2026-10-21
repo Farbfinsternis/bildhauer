@@ -46,6 +46,16 @@ void fillLayer(bool invert);
 // What fillLayer does now, for buttons and messages.
 const char* fillLabel();
 
+// Brush mask (mask = true, made gray) or brush texture from a file dialog;
+// switches it on. False if cancelled or unreadable.
+bool chooseStampImage(bool mask);
+// The same without the dialog.
+bool loadStampImage(const std::string& path, bool mask);
+// Builds the stamps from the images and options; call after any change.
+void rebuildStamps();
+// Whether strokes use a stamp: an enabled mask or texture that is loaded.
+bool stampsActive();
+
 // A new material layer with the next built-in matcap; it becomes what Paint
 // color paints. Returns its slot or -1 when all are in use.
 int addMaterialLayer();

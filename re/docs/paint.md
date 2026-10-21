@@ -132,41 +132,64 @@ with `r` = brush radius and `s` = signed strength:
 ```
 k  = min(1, 0.6 · |s|) · sign(s)          // amount, −1 … 1
 H  = hardness² · 0.95
-stamp frame: center c, normal and two axes from the view, rotated by the
-             stroke direction (Directional) or randomly (Random); mirrored
-             dabs flip it
 texels: the texels found by a spatial query with radius 1.3 · r around c
         (0x4245E0); each gets x = 2·d / (3·r), d = distance of its 3D
         position to c. The falloff would reach 1.5 r, but the query limits
         the dab to about 1.3 r  [likely: the query is not coarser]
 ```
 
+**Stamp frame.** Every dab builds an orthonormal frame `(A, B, N)` (passed
+to 0x426120 and kept at 0x519D3C, 0x51748C, 0x5174A4); `N` is the stamp
+normal and points toward the viewer, `A` and `B` span the stamp. Inputs
+are the view direction `w` of the stroke (stroke +0x68), the screen axes
+`X`, `Y` (rows of the view rotation, 0x4BDC60) and the stamp angle `θ`
+(0x4FD158):
+
+- **Fixed (Directional off):** `U = sin θ · X − cos θ · Y` (the screen
+  direction at angle θ), `A = normalize(w × U)`, `B = normalize(w × A)`,
+  `N = normalize(B × A)`. The stamp lies in the screen plane and turns
+  with θ; θ is set by dragging in the stamp preview of the UI.
+- **Directional:** a direction `D` (static 0x51A7C4, starting at (1, 0, 0))
+  follows the movement of the dab center: whenever the center has moved,
+  `D += 0.3 · (Δ − D)` with Δ the movement. **Random** instead takes a new
+  `D` per dab with components uniform in [−0.5, 0.5]. `D` is projected into
+  the screen plane (`D −= w · (w · D)`) and normalized; `B = D`,
+  `A = w × B`, `N = B × A` (0x415670, shared with the sculpt brush mask).
+- A dab mapped from the mirrored half flips the frame's x components.
+
+Before the per-texel pass, the dab averages over the texels in range,
+weighted by `1 − x`: the texel normals, the bump heights (Heightmask from
+Bumpmap) and the depths along the previous dab's mean normal (Heightmask
+from Geometry). The 64 × 64 texel tiles that the dab touches are marked
+dirty and backed up for undo (0x4248E0).
+
 - **Color (tool 0):** target color = primary, or secondary if `k ≤ 0`
   (Ctrl inverts the strength). With "Combine color and bump" the same dab
   also paints bump (mode 1) with the strength of the **Paint bump** tool:
   `s_b = s · S(bumpStrength) / S(colorStrength)` (S as in brushes.md 2.4),
   `k_b = min(1, 0.6 · |s_b|)³ · sign(s_b)`.
-- **Paint bump (tool 1):** mode 1. **Flatten bump (tool 4):** mode 2.
-
-Before the per-texel pass, the dab averages over the texels in range,
-weighted by `1 − x`: the texel normals (stamp frame for the angle
-falloff), the bump heights (Heightmask from Bumpmap) and the depths along
-the mean normal (Heightmask from Geometry). The 64 × 64 texel tiles that
-the dab touches are marked dirty and backed up for undo (0x4248E0).
+- **Paint bump (tool 1):** mode 1. **Flatten bump (tool 4):** mode 2. The
+  color tool samples the color stamp (0x51722C), the bump tools the bump
+  stamp (0x5171F0), see 3.6.
 
 ### 3.3 Per texel (`PaintTexels`, 0x4257A0, multithreaded) **[sure unless marked]**
+
+With `e` = texel position − c:
 
 ```
 f = 1
 if H < 1:  f = smooth((1 − x) / (1 − H))       // smooth as brushes.md 3.2;
                                                // H = 0 gives smooth(1 − x)
 if paint mask enabled:  f *= mask[texel] / 255
-if brush mask or brush texture:
-    (u, v) = projection of the texel onto the stamp axes, scaled so the
-             stamp covers ±1.5 r, + 0.5; outside [0, 1]² → skip
-    depth falloff from the distance to the stamp plane  [likely]
+m = 1
+if brush mask or brush texture enabled (a stamp is used):
+    u = (e · A) / (3r) + 0.5,  v = (e · B) / (3r) + 0.5
+    outside [0, 1]² → skip                      // the stamp covers ±1.5 r
+    q = (0.15 − |e · N| / (3r)) / 0.05          // depth along the stamp normal
+    q ≤ 0 → skip                                 // full up to 0.3 r, gone at 0.45 r
+    m = clamp(q · k, 1/128, 1)
 if surface angle falloff (or a stamp):
-    a = (dot(texelNormal, stampNormal) − 0.15) · 3
+    a = (dot(texelNormal, N) − 0.15) · 3        // N: the stamp normal, toward the viewer
     a < 0 → skip;  a < 1 → f *= a
 if heightmask:
     from the bump height and/or the geometric depth relative to the dab
@@ -174,18 +197,29 @@ if heightmask:
     Cavity inverts it; f *= clamp(…, 0, 1)  [exact ramps likely]
 ```
 
-Writing:
+The angle falloff thus favors surfaces that face the viewer; texels turned
+more than about 81° away (dot < 0.15) are not painted.
+
+Writing, without a stamp:
 
 - **Mode 0 (color):** the layer keeps 16-bit channels per texel. With
   `A = round(|k| · 255)` the step is
   `c += (target − c) · (A·257 · round(f · 32768) >> 15) >> 16`, i.e. the
-  color moves by about `|k| · f` of the way to the target. With a brush
-  texture the target is the sampled stamp color; with a brush mask the
-  stamp's gray value scales the amount.
+  color moves by about `|k| · f` of the way to the target.
 - **Mode 1 (bump):** `h += (round(f · k · 24576) · 255) >> 8`
   (≈ 24 480 · f · k per dab; negative k lowers).
 - **Mode 2 (flatten bump):** `h += (round(f · k · 255) · (2^28 − h)) >> 8`,
   i.e. h moves by `f · k` toward the neutral height.
+
+With a stamp, the stamp sample `S = (RGB, α)` at (u, v) (0x41C940:
+bilinear, u and v clamped to [0, 1], pixel coordinates `u · (w − 1)`,
+`v · (h − 1)`) takes the place of `k`:
+
+- **Mode 0:** `A = α`, the step uses `f · m` instead of `f`; the target is
+  the stamp's RGB with Brush texture on, else the paint color as above.
+- **Modes 1 and 2:** `f · k` becomes `(α / 255) · m · f`. Since `m` is
+  clamped to at least 1/128, a negative k paints at that minimum instead of
+  lowering **[as read]**.
 
 ### 3.4 Bump to normals (`UpdateBumpNormals`, 0x424170) **[sure]**
 
@@ -227,6 +261,29 @@ press). Afterwards the bump normals are recomputed when the tool is not Paint
 color, and the images are uploaded. While a material mask is edited (4.2),
 the mask sits in the color layer's place, so Fill/Clear with Paint color
 fills that mask.
+
+### 3.6 Stamps: brush mask and brush texture (0x423D00) **[sure]**
+
+Two images can be loaded from files (the samples ship in `textures/`):
+a **brush texture** (0x5171B4, RGBA as loaded) and a **brush mask**
+(0x517178). On loading, the mask becomes a gray value in alpha:
+`g = (2R + 3G + B) / 6`, `α = ((α_file + 1) · g) >> 8`, RGB white
+(0x4236A0, 0x4237E0). Whenever an option changes, 0x423D00 builds the two
+stamps:
+
+```
+color stamp = brush texture (RGBA) if Brush texture is on, else white, α = 255
+bump stamp  = brush texture made gray as the mask above (α = luminance · α)
+              if Brush texture is on, else white, α = 255
+with Brush mask on, for both stamps:
+    if the stamp has fewer pixels (w + h) than the mask: resample it to the
+    mask's size (bilinear)
+    α = ((maskα(x / w, y / h) + 1) · α) >> 8   // mask sampled bilinearly
+Invert (brush mask) turns the mask's α into 255 − α for this.
+```
+
+So the mask shapes where the stamp paints, the texture what it paints: its
+colors with Paint color, its brightness as height with the bump tools.
 
 ## 4. Materials (matcaps)
 
@@ -294,9 +351,7 @@ place of the missing matcap **[open]**.
 
 ## 5. Open points
 
-- Exact stamp depth falloff and heightmask ramps (3.3).
+- Exact heightmask ramps (3.3).
 - UI label of material flag +0x24A.
-- How the dab's stamp frame is built from the view (rotation, Directional,
-  Random).
 - The UV atlas itself (section 2) is not reconstructed on purpose:
   bildhauer uses its own unwrapping and keeps the UVs stored in .sc1.

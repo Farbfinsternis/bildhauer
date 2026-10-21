@@ -114,6 +114,8 @@ int runSnapshot(const SnapshotOptions& o) {
   app.height = rc.bottom;
   if (o.symmetryOff) setSymmetry(false);
   if (o.paint) enterPaintMode();
+  if (!o.brushMask.empty()) loadStampImage(o.brushMask, true);
+  if (!o.brushTexture.empty()) loadStampImage(o.brushTexture, false);
   if (o.demo) app.paintMode ? runPaintDemo() : runDemo();
   if (o.save) {
     std::string err;

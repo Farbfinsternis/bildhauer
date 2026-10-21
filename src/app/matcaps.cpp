@@ -1,11 +1,9 @@
 #include "app/matcaps.h"
 
-#include <windows.h>
-#include <wincodec.h>
-
 #include <algorithm>
 #include <cmath>
 
+#include "app/images.h"
 #include "core/vec3.h"
 
 namespace bh {
@@ -49,45 +47,20 @@ void computeBuiltin(const Builtin& b, MatcapImage& out) {
     }
 }
 
-template <class T>
-void release(T*& p) {
-  if (p) p->Release();
-  p = nullptr;
-}
-
 bool loadImageFile(const std::string& path, MatcapImage& out, std::string* error) {
-  IWICImagingFactory* factory = nullptr;
-  IWICBitmapDecoder* decoder = nullptr;
-  IWICBitmapFrameDecode* frame = nullptr;
-  IWICFormatConverter* converter = nullptr;
-  std::wstring wpath(MultiByteToWideChar(CP_ACP, 0, path.c_str(), -1, nullptr, 0), L'\0');
-  MultiByteToWideChar(CP_ACP, 0, path.c_str(), -1, wpath.data(), int(wpath.size()));
-  bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
-            SUCCEEDED(factory->CreateDecoderFromFilename(wpath.c_str(), nullptr, GENERIC_READ,
-                                                         WICDecodeMetadataCacheOnDemand, &decoder)) &&
-            SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(factory->CreateFormatConverter(&converter)) &&
-            SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat24bppRGB, WICBitmapDitherTypeNone, nullptr, 0,
-                                            WICBitmapPaletteTypeCustom));
-  UINT w = 0, h = 0;
-  if (ok) ok = SUCCEEDED(converter->GetSize(&w, &h)) && w > 0 && h > 0 && w <= 8192 && h <= 8192;
-  std::vector<uint8_t> topDown;
-  if (ok) {
-    topDown.resize(size_t(w) * h * 3);
-    ok = SUCCEEDED(converter->CopyPixels(nullptr, w * 3, UINT(topDown.size()), topDown.data()));
-  }
-  release(converter);
-  release(frame);
-  release(decoder);
-  release(factory);
-  if (!ok) {
-    if (error) *error = "cannot read " + path;
-    return false;
-  }
-  out.width = int(w);
-  out.height = int(h);
-  out.rgb.resize(topDown.size());
-  for (UINT y = 0; y < h; ++y)  // bottom row first
-    std::copy_n(&topDown[size_t(h - 1 - y) * w * 3], w * 3, &out.rgb[size_t(y) * w * 3]);
+  viewer::Image image;
+  if (!viewer::loadImage(path, image, error)) return false;
+  out.width = image.width;
+  out.height = image.height;
+  out.rgb.resize(size_t(image.width) * image.height * 3);
+  for (int y = 0; y < image.height; ++y)  // bottom row first
+    for (int x = 0; x < image.width; ++x) {
+      const uint32_t p = image.rgba[size_t(image.height - 1 - y) * image.width + x];
+      uint8_t* o = &out.rgb[(size_t(y) * image.width + x) * 3];
+      o[0] = uint8_t(p);
+      o[1] = uint8_t(p >> 8);
+      o[2] = uint8_t(p >> 16);
+    }
   return true;
 }
 

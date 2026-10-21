@@ -104,7 +104,13 @@ F Flatten bump; with Shift `[` `]` change the hardness; N shows the bump
 normal map. Ctrl+F fills the whole color layer (or the edited layer's mask)
 with the primary color, or with a bump tool clears the bump, as far as the
 Strength slider says; Ctrl+Shift+F fills with the secondary color or empties
-the mask. Shading follows paint.md 4.1: the matcap lights the paint color
+the mask. The Stamp section of the panel loads a brush mask (shapes where a
+dab paints, from the image's brightness) and a brush texture (Paint color
+paints its colors, the bump tools its brightness) from image files, for
+example Sculptris' `textures` folder; the stamp lies in the screen plane,
+turned by Angle, or follows the stroke (Directional) or turns randomly
+(Random). Surface angle falloff paints less where the surface turns away
+from the view. Shading follows paint.md 4.1: the matcap lights the paint color
 like a hard-light layer, with the bump normals. Materials: L adds a layer (up
 to 15), 0-9 choose what Paint color paints (0 the color layer, n the mask of
 layer n), M cycles the built-in matcaps of that slot, O loads a matcap image
@@ -112,7 +118,8 @@ for it, C toggles Colored, A additive blending, H hides the layer. Matcap
 images named in a painted .sc1 are loaded from where the file says, if they
 exist.
 
-`--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]`
+`--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]
+[--brush-mask image] [--brush-texture image]`
 renders one frame (after a few demo strokes, in paint mode with paint strokes
 and a gold layer; --save saves as `<name>_bildhauer.sc1` first) and exits.
 
@@ -164,5 +171,6 @@ Implementation:
 | UI: menus, tool panel (sculpt and paint), colors, material layers, status bar | done (`src/app/ui`, Dear ImGui), first version |
 | Symmetry switching with plane-valence reduction | done (`src/core/symmetry`); on and off on all samples, quads kept; Sculpt panel and Edit menu |
 | Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
+| Paint mode: brush mask and brush texture (stamps), Fill/Clear | done (`src/core/paint`, panel); stamp frame, depth falloff and stamp building after paint.md 3.2, 3.3, 3.6 |
 | Paint mode: painting (color, bump, flatten), bump normals, tile undo | done (`src/core/paint`); formulas checked against paint.md, stored images load unchanged |
 | Paint mode: matcap shading with bump, material layers, saving paint data | done (`src/app`, `src/core/paint`, `src/io`); saved files load back identically and open in Sculptris Alpha 6 without visible differences (checked by hand 2026-10-21) |
