@@ -274,6 +274,21 @@ void enterPaintMode() {
   app.status = msg;
 }
 
+void fillLayer(bool invert) {
+  if (!app.paintMode) return;
+  app.paintStroke.reset();
+  PaintSettings s = app.paint;
+  s.target = app.editSlot;
+  app.canvas->fill(s, paintSliders()[1], invert);
+  app.modified = true;
+  app.status = std::string(fillLabel()) + (invert ? ", inverted" : "");
+}
+
+const char* fillLabel() {
+  if (app.paint.tool != PaintTool::Color) return "Clear bump";
+  return app.editSlot > 0 ? "Fill layer mask" : "Fill color";
+}
+
 std::string nextBuiltinMatcap(const std::string& current) {
   const std::vector<std::string>& names = builtinMatcaps();
   auto it = std::find(names.begin(), names.end(), current);

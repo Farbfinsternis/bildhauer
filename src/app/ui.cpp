@@ -222,6 +222,12 @@ void paintPanel(float width) {
   slider("Hardness", ps[2]);
   ImGui::Checkbox("Surface angle falloff", &app.paint.angleFalloff);
   ImGui::TextDisabled("Ctrl inverts");
+  char fill[64];
+  std::snprintf(fill, sizeof fill, "%s (Ctrl+F)", fillLabel());
+  if (ImGui::Button(fill, ImVec2(-1, 0))) fillLayer(ImGui::GetIO().KeyShift);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("The whole layer at once, as far as Strength says.\n"
+                      "With Shift (Ctrl+Shift+F): the secondary color, or an empty mask.");
 
   ImGui::SeparatorText("Colors");
   colorEdit("Primary", app.paint.primary);
@@ -335,6 +341,7 @@ void dialogs() {
         "  Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+P paint mode\n"
         "\n"
         "Paint: D color, B bump, F flatten bump, N bump normal map\n"
+        "  Ctrl+F fill color / layer mask or clear bump (with Shift: inverted)\n"
         "  L add layer, 0-9 paint target (0 color, n mask of layer n),\n"
         "  M next matcap, O matcap image, C colored, A additive, H hide");
     ImGui::End();

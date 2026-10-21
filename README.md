@@ -101,7 +101,10 @@ what differs on the -x side (both undoable).
 
 Paint mode (files with paint data open in it): D Paint color, B Paint bump,
 F Flatten bump; with Shift `[` `]` change the hardness; N shows the bump
-normal map. Shading follows paint.md 4.1: the matcap lights the paint color
+normal map. Ctrl+F fills the whole color layer (or the edited layer's mask)
+with the primary color, or with a bump tool clears the bump, as far as the
+Strength slider says; Ctrl+Shift+F fills with the secondary color or empties
+the mask. Shading follows paint.md 4.1: the matcap lights the paint color
 like a hard-light layer, with the bump normals. Materials: L adds a layer (up
 to 15), 0-9 choose what Paint color paints (0 the color layer, n the mask of
 layer n), M cycles the built-in matcaps of that slot, O loads a matcap image

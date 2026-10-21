@@ -50,7 +50,10 @@ void onPaintKey(WPARAM key, bool ctrl, bool shift) {
     case VK_OEM_MINUS: nudge(ps[1], -0.1f); return;
     case VK_OEM_PLUS: nudge(ps[1], 0.1f); return;
   }
-  if (ctrl) return;
+  if (ctrl) {
+    if (key == 'F') fillLayer(shift);
+    return;
+  }
   switch (key) {
     case 'D': app.paint.tool = PaintTool::Color; break;
     case 'B': app.paint.tool = PaintTool::Bump; break;

@@ -39,6 +39,13 @@ void setSymmetry(bool on);
 // back: sculpting would invalidate the mapping.
 void enterPaintMode();
 
+// Fill/Clear (paint.md 3.5) with the current paint tool, as far as its
+// Strength slider says: fills the color layer (or the edited layer's mask),
+// or clears the bump. Inverted: the secondary color, or an empty mask.
+void fillLayer(bool invert);
+// What fillLayer does now, for buttons and messages.
+const char* fillLabel();
+
 // A new material layer with the next built-in matcap; it becomes what Paint
 // color paints. Returns its slot or -1 when all are in use.
 int addMaterialLayer();

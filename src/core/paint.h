@@ -19,7 +19,7 @@
 // normals ignore neighbors outside the charts. Material slots (paint.md
 // 4.2) keep a mask per layer, painted like the color layer. Not yet
 // implemented: brush mask/texture, heightmask, paint mask, Combine color and
-// bump, Airbrush, Fill/Clear.
+// bump, Airbrush.
 
 #include <array>
 #include <cstdint>
@@ -121,6 +121,13 @@ class Canvas {
   // One dab at a visible surface point (mirror side included).
   void dab(const Vec3& center, const PaintSettings& s);
 
+  // Fill/Clear (paint.md 3.5) on the layer of s.tool, with `amount` the
+  // tool's raw Strength slider: Paint color moves every covered texel that
+  // far toward the primary color (secondary if inverted), or the mask of
+  // s.target toward full (empty if inverted); the bump tools move the
+  // heights toward neutral. One undo step.
+  void fill(const PaintSettings& s, float amount, bool invert);
+
   // Tiles changed since the last call, with their normal map brought up to
   // date. Tile t covers texels from (t % tilesX, t / tilesX) * kTileSize.
   std::vector<int> takeChangedTiles();
@@ -139,6 +146,7 @@ class Canvas {
   void markChanged(int tile);
   void updateNormals(int tile);
   void setColor16(int texel, uint32_t rgba);
+  int tileOf(int texel) const;
 
   Texels texels_;
   TexelGrid grid_;

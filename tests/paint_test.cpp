@@ -1,6 +1,6 @@
 // Paint mode: texel baking and the range query on every sample, then color,
 // bump and flatten dabs, normals, undo and symmetry against the formulas of
-// re/docs/paint.md 3; material masks; tangents; saving paint data (a stored
+// re/docs/paint.md 3; Fill/Clear; material masks; tangents; saving paint data (a stored
 // texturing block re-encodes byte-identically, painted canvases survive a
 // save and load); stored images of painted files load unchanged.
 //
@@ -245,6 +245,67 @@ void testMasks(const Mesh& m, const TextureMapping& map) {
         "masks: undo restores the mask");
 }
 
+void testFill(const Mesh& m, const TextureMapping& map) {
+  Canvas canvas(m, map, kSize, kSize);
+  const Texels& tx = canvas.texels();
+  const std::vector<uint32_t> before = canvas.colorImage();
+  PaintSettings s;
+  canvas.fill(s, 1.0f, false);
+  int wrong = 0, touchedUncovered = 0;
+  for (size_t i = 0; i < tx.triangle.size(); ++i) {
+    if (tx.triangle[i] < 0) touchedUncovered += canvas.colorImage()[i] != before[i];
+    else wrong += !sameColor(canvas.colorImage()[i], s.primary, 1);
+  }
+  check(wrong == 0 && touchedUncovered == 0, "fill: strength 1 paints every covered texel, nothing else");
+  canvas.fill(s, 1.0f, true);
+  wrong = 0;
+  for (size_t i = 0; i < tx.triangle.size(); ++i) wrong += tx.triangle[i] >= 0 && !sameColor(canvas.colorImage()[i], s.secondary, 1);
+  check(wrong == 0, "fill: inverted fills with the secondary color");
+  canvas.undo();
+  canvas.undo();
+  check(canvas.colorImage() == before, "fill: undo restores the color layer");
+
+  const int c = centerTexel(m, tx, 0);
+  const uint32_t from = canvas.colorImage()[c];
+  canvas.fill(s, 0.5f, false);
+  bool halfway = true;
+  for (int k = 0; k < 3; ++k) {
+    float expect = channel(from, k) + (channel(s.primary, k) - channel(from, k)) * 0.5f;
+    if (std::fabs(channel(canvas.colorImage()[c], k) - expect) > 1.5f) halfway = false;
+  }
+  check(halfway, "fill: strength 0.5 goes half the way");
+
+  // Clear: the bump tools pull the heights toward neutral.
+  Vec3 center;
+  PaintSettings bump;
+  bump.tool = PaintTool::Bump;
+  bump.radius = length(bboxDiagonal(m, &center)) * 0.05f;
+  bump.strength = 1.97f;
+  canvas.dab(tx.pos[c], bump);
+  canvas.dab(tx.pos[c], bump);
+  const int64_t h0 = int64_t(canvas.heights()[c]) - kNeutralHeight;
+  const std::vector<uint32_t> beforeClear = canvas.colorImage();
+  canvas.fill(bump, 1.0f, false);
+  const int64_t h1 = int64_t(canvas.heights()[c]) - kNeutralHeight;
+  check(h0 > 0 && h1 == h0 + ((-255 * h0) >> 8), "clear: the bump moves 255/256 of the way to neutral");
+  check(canvas.colorImage() == beforeClear, "clear: colors untouched");
+
+  // With a layer as target, Paint color fills its mask.
+  const int slot = canvas.addLayer("layer");
+  PaintSettings maskFill;
+  maskFill.target = slot;
+  const std::vector<uint32_t> colors = canvas.colorImage();
+  canvas.takeChangedMasks();
+  canvas.fill(maskFill, 1.0f, false);
+  check(canvas.material(slot).mask[c] == 255 && canvas.colorImage() == colors &&
+            canvas.takeChangedMasks() == 1u << slot,
+        "fill: with a layer as target the mask fills, not the colors");
+  canvas.fill(maskFill, 1.0f, true);
+  check(canvas.material(slot).mask[c] == 0, "fill: inverted empties the mask");
+  canvas.undo();
+  check(canvas.material(slot).mask[c] == 255, "fill: undo restores the mask");
+}
+
 void testTangents(const Mesh& m, const TextureMapping& map) {
   std::vector<Tangent> tan = computeTangents(m, map);
   int bad = 0, wrongWay = 0, total = 0;
@@ -347,6 +408,7 @@ void testFile(const std::string& path) {
   testBake(m, map, canvas);
   testGrid(m, canvas.texels());
   testDabs(m, map);
+  testFill(m, map);
   testMasks(m, map);
   testTangents(m, map);
   testSave(m, map, file);

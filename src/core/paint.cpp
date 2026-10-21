@@ -236,7 +236,6 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
   const float reach = 1.3f * r;
   const float k = std::copysign(std::min(1.0f, 0.6f * std::fabs(s.strength)), s.strength);
   const float hard = s.hardness * s.hardness * 0.95f;
-  const int w = texels_.width;
 
   found_.clear();
   grid_.query(center, reach, found_);
@@ -296,7 +295,7 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
     }
     if (f <= 0) continue;
     const int i = hits_[h];
-    touchTile((i / w / kTileSize) * tilesX_ + (i % w) / kTileSize, slot);
+    touchTile(tileOf(i), slot);
     switch (s.tool) {
       case PaintTool::Color: {
         const int64_t amount = (alpha16 * std::lround(f * 32768)) >> 15;
@@ -322,6 +321,43 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
         heights_[i] = int32_t(std::clamp<int64_t>(v, 0, INT32_MAX));
         break;
       }
+    }
+  }
+}
+
+int Canvas::tileOf(int i) const {
+  const int w = texels_.width;
+  return (i / w / kTileSize) * tilesX_ + (i % w) / kTileSize;
+}
+
+void Canvas::fill(const PaintSettings& s, float amount, bool invert) {
+  beginUndoStep();
+  amount = std::clamp(amount, 0.0f, 1.0f);
+  const int slot = s.tool == PaintTool::Color && s.target > 0 && s.target < kMaxMaterials &&
+                           materials_[s.target].used ? s.target : 0;
+  if (slot > 0) {
+    changedMasks_ |= 1u << slot;
+    mask16_[slot].clear();  // rebuilt from the bytes below
+  }
+  const uint32_t target = invert ? s.secondary : s.primary;
+  const int64_t t16[3] = {(target & 0xFF) * 257, (target >> 8 & 0xFF) * 257, (target >> 16 & 0xFF) * 257};
+  const int64_t step = (65535 * int64_t(std::lround(amount * 32768))) >> 15;  // alpha 0xFFFF
+  const int64_t flatten = std::lround(amount * 255);
+  for (size_t idx = 0; idx < texels_.triangle.size(); ++idx) {
+    if (texels_.triangle[idx] < 0) continue;
+    const int i = int(idx);
+    touchTile(tileOf(i), slot);
+    if (s.tool != PaintTool::Color) {
+      heights_[i] = int32_t(heights_[i] + ((flatten * (int64_t(kNeutralHeight) - heights_[i])) >> 8));
+    } else if (slot > 0) {
+      uint8_t& m = materials_[slot].mask[i];
+      const int64_t m16 = m * 257, goal = invert ? 0 : 65535;
+      m = uint8_t((m16 + (((goal - m16) * step) >> 16)) >> 8);
+    } else {
+      uint16_t* ch[3] = {&r16_[i], &g16_[i], &b16_[i]};
+      for (int c = 0; c < 3; ++c) *ch[c] = uint16_t(*ch[c] + (((t16[c] - *ch[c]) * step) >> 16));
+      color_[i] = (color_[i] & 0xFF000000u) | uint32_t(r16_[i] >> 8) | uint32_t(g16_[i] >> 8) << 8 |
+                  uint32_t(b16_[i] >> 8) << 16;
     }
   }
 }

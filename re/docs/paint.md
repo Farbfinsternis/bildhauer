@@ -94,7 +94,7 @@ The hardness sliders reset to 0.5.
 | 0 | Paint color [D] | color layer (0x4B0B14), mode 0 |
 | 1 | Paint bump [B] | bump layer (0x4B0AD8), mode 1 |
 | 4 | Flatten bump [F] | bump layer, mode 2 |
-| – | Fill/Clear [Ctrl+F] | whole layer **[open: details]** |
+| – | Fill/Clear [Ctrl+F] | the current tool's layer at once, see 3.5 |
 
 Every paint tool has **Size**, **Strength** and **Hardness** sliders in
 [0, 1] (hardness array 0x4BD940). Size and strength map as in
@@ -202,6 +202,32 @@ normal texel = (128 + 127·n.x, 128 + 127·n.y, 128 + 127·n.z)   (bytes 0, 1, 2
 So a height step of `10 · 2^20 / W` between neighboring texels tilts the
 normal by 45°: the bump unit is tied to the texel size, not to mesh units.
 
+### 3.5 Fill/Clear (0x424CD0) **[sure]**
+
+Not a tool but an action: the paint toolbar's third button ("FILL/CLEAR
+[CTRL+F]", tool-name table 0x4B2380, stride 0x20) or Ctrl+F in paint mode
+runs it once per press (latch 0x51A682). It works on the layer of the
+current paint tool, with `s` = that tool's **raw Strength slider** (array
+0x4B17F8, not the curve of brushes.md 2.4):
+
+```
+for every texel that a triangle covers (bake result != 0), that is not
+hidden, and, with the paint mask on, whose mask · s is not 0:
+    a = s,  or (mask / 255) · s with the paint mask on
+    back up its 64 x 64 tile for undo, mark it dirty
+    Paint color:  target = primary, or secondary with Invert on (0x4FD147);
+                  the color step of 3.3 with A = 255 (alpha 0xFFFF) and
+                  f = a:  c += (t − c) · ((65535 · round(a · 32768)) >> 15) >> 16
+    bump tools:   h += (round(a · 255) · (2^28 − h)) >> 8
+```
+
+So Fill/Clear **fills** the color layer (strength 1: the primary color
+everywhere) and **clears** the bump (strength 1: flat, 255/256 of the way per
+press). Afterwards the bump normals are recomputed when the tool is not Paint
+color, and the images are uploaded. While a material mask is edited (4.2),
+the mask sits in the color layer's place, so Fill/Clear with Paint color
+fills that mask.
+
 ## 4. Materials (matcaps)
 
 ### 4.1 Shading **[sure]**
@@ -268,7 +294,6 @@ place of the missing matcap **[open]**.
 
 ## 5. Open points
 
-- Fill/Clear [Ctrl+F] in detail.
 - Exact stamp depth falloff and heightmask ramps (3.3).
 - UI label of material flag +0x24A.
 - How the dab's stamp frame is built from the view (rotation, Directional,
