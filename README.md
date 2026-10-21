@@ -37,7 +37,8 @@ re/
     const.js          read float constants from the EXE
   _work/              disassembly and intermediate results (local only)
 src/                  implementation (C++20, OpenGL)
-  app/                viewer (Win32 + OpenGL 1.x, no other dependencies)
+  app/                viewer (Win32 + OpenGL; GLSL paint shading when OpenGL 2.0
+                      is there, matcaps computed or read via Windows Imaging)
   core/               mesh kernel (mesh.h), brushes (brush), picking (pick),
                       edge split + brush tessellation
                       (tessellate), collapse + reduction (reduce), relaxation +
@@ -49,7 +50,8 @@ tests/
   ops_test.cpp        runs every mesh operation and checks validity and topology
   brush_test.cpp      picking and all 11 brushes on real meshes
   texmap_test.cpp     UV atlas on every sample, stored UVs of painted files
-  paint_test.cpp      texel baking, range query, color/bump/flatten dabs, undo
+  paint_test.cpp      texel baking, range query, color/bump/flatten dabs, undo,
+                      material masks, tangents, saving and loading paint data
   brush_bench.cpp     times strokes phase by phase (not a test; brush_bench <file.sc1>)
 ```
 
@@ -84,12 +86,18 @@ Ctrl+P enters paint mode (one way, as in Sculptris; files with paint data
 open in it): LMB paints, Ctrl inverts (secondary color, lowers the bump).
 D Paint color, B Paint bump, F Flatten bump; `[` `]` size, with Ctrl
 strength, with Shift hardness; K picks the primary color, Shift+K the
-secondary; N shows the bump normal map; Ctrl+Z undo. Shading is still a
-stand-in (color times gray matcap), the bump only shows in the normal map
-view, and paint data cannot be saved yet.
+secondary; N shows the bump normal map; Ctrl+Z undo; Ctrl+S saves with the
+paint data. Shading follows paint.md 4.1: the matcap lights the paint color
+like a hard-light layer, with the bump normals. Materials: L adds a layer
+(up to 15), 0-9 choose what Paint color paints (0 the color layer, n the
+mask of layer n), M cycles the built-in matcaps of that slot, O loads a
+matcap image for it, C toggles Colored, A additive blending, H hides the
+layer. Matcap images named in a painted .sc1 are loaded from where the file
+says, if they exist.
 
-`--snapshot out.png [--demo] [--paint] [--bump-normals]` renders one frame
-(after a few demo strokes, in paint mode with paint strokes) and exits.
+`--snapshot out.png [--demo] [--paint] [--bump-normals] [--save]` renders
+one frame (after a few demo strokes, in paint mode with paint strokes and a
+gold layer; --save saves first, as Ctrl+S) and exits.
 
 The test data is not part of the repository. By default the tests use the
 `.sc1` files from `BILDHAUER_SCULPTRIS_DIR` (`data/`, `models/`) and
@@ -139,4 +147,4 @@ Implementation:
 | Symmetry switching with plane-valence reduction | open |
 | Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
 | Paint mode: painting (color, bump, flatten), bump normals, tile undo | done (`src/core/paint`); formulas checked against paint.md, stored images load unchanged |
-| Paint mode: matcap shading with bump, material layers, saving paint data | open |
+| Paint mode: matcap shading with bump, material layers, saving paint data | done (`src/app`, `src/core/paint`, `src/io`); saved files load back identically; opening them in Sculptris not yet checked |

@@ -171,6 +171,41 @@ Canvas::Canvas(const Mesh& mesh, const TextureMapping& map, int width, int heigh
   savedIn_.assign(changed_.size(), 0);
   for (int t = 0; t < tilesX_ * tilesY_; ++t) updateNormals(t);
   seen_.assign(n, 0);
+  materials_[0].used = true;
+  materials_[0].mask.assign(n, 255);
+}
+
+void Canvas::setMaterial(int slot, Material m, int mw, int mh) {
+  const int w = width(), h = height();
+  if (mw != w || mh != h) {  // nearest texel
+    std::vector<uint8_t> resampled(size_t(w) * h, 255);
+    if (mw > 0 && mh > 0 && m.mask.size() >= size_t(mw) * mh)
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) resampled[size_t(y) * w + x] = m.mask[size_t(y * mh / h) * mw + x * mw / w];
+    m.mask.swap(resampled);
+  }
+  materials_[slot] = std::move(m);
+  mask16_[slot].clear();
+  changedMasks_ |= 1u << slot;
+}
+
+int Canvas::addLayer(const std::string& matcap) {
+  for (int slot = 1; slot < kMaxMaterials; ++slot) {
+    if (materials_[slot].used) continue;
+    Material m;
+    m.used = true;
+    m.matcap = matcap;
+    m.mask.assign(color_.size(), 0);
+    setMaterial(slot, std::move(m), width(), height());
+    return slot;
+  }
+  return -1;
+}
+
+uint32_t Canvas::takeChangedMasks() {
+  uint32_t m = changedMasks_;
+  changedMasks_ = 0;
+  return m;
 }
 
 bool Canvas::loadImages(const std::vector<int32_t>& color, const std::vector<int32_t>& bump, std::string* error) {
@@ -241,6 +276,15 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
   const uint32_t target = k > 0 ? s.primary : s.secondary;
   const int64_t t16[3] = {(target & 0xFF) * 257, (target >> 8 & 0xFF) * 257, (target >> 16 & 0xFF) * 257};
   const int64_t alpha16 = std::lround(std::fabs(k) * 255) * 257;
+  const int slot = s.tool == PaintTool::Color && s.target > 0 && s.target < kMaxMaterials &&
+                           materials_[s.target].used ? s.target : 0;
+  std::vector<uint8_t>& mask = materials_[slot].mask;
+  std::vector<uint16_t>& mask16 = mask16_[slot];
+  if (slot > 0 && mask16.size() != mask.size()) {
+    mask16.resize(mask.size());
+    for (size_t i = 0; i < mask.size(); ++i) mask16[i] = uint16_t(mask[i] * 257);
+  }
+  if (slot > 0) changedMasks_ |= 1u << slot;
 
   for (size_t h = 0; h < hits_.size(); ++h) {
     float f = 1;
@@ -252,10 +296,16 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
     }
     if (f <= 0) continue;
     const int i = hits_[h];
-    touchTile((i / w / kTileSize) * tilesX_ + (i % w) / kTileSize);
+    touchTile((i / w / kTileSize) * tilesX_ + (i % w) / kTileSize, slot);
     switch (s.tool) {
       case PaintTool::Color: {
         const int64_t amount = (alpha16 * std::lround(f * 32768)) >> 15;
+        if (slot > 0) {
+          const int64_t goal = k > 0 ? 65535 : 0;
+          mask16[i] = uint16_t(mask16[i] + (((goal - mask16[i]) * amount) >> 16));
+          mask[i] = uint8_t(mask16[i] >> 8);
+          break;
+        }
         uint16_t* ch[3] = {&r16_[i], &g16_[i], &b16_[i]};
         for (int c = 0; c < 3; ++c) *ch[c] = uint16_t(*ch[c] + (((t16[c] - *ch[c]) * amount) >> 16));
         color_[i] = (color_[i] & 0xFF000000u) | uint32_t(r16_[i] >> 8) | uint32_t(g16_[i] >> 8) << 8 |
@@ -276,16 +326,20 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
   }
 }
 
-void Canvas::touchTile(int tile) {
+void Canvas::touchTile(int tile, int slot) {
   if (!undo_.empty() && savedIn_[tile] != step_) {
     savedIn_[tile] = step_;
-    SavedTile saved{tile, {}, {}};
+    SavedTile saved{tile, {}, {}, slot, {}};
     const int x0 = (tile % tilesX_) * kTileSize, y0 = (tile / tilesX_) * kTileSize;
     const int x1 = std::min(x0 + kTileSize, width()), y1 = std::min(y0 + kTileSize, height());
     for (int y = y0; y < y1; ++y) {
       const size_t row = size_t(y) * width();
       saved.color.insert(saved.color.end(), color_.begin() + row + x0, color_.begin() + row + x1);
       saved.heights.insert(saved.heights.end(), heights_.begin() + row + x0, heights_.begin() + row + x1);
+      if (slot > 0) {
+        const std::vector<uint8_t>& mask = materials_[slot].mask;
+        saved.mask.insert(saved.mask.end(), mask.begin() + row + x0, mask.begin() + row + x1);
+      }
     }
     undo_.back().push_back(std::move(saved));
   }
@@ -356,7 +410,12 @@ bool Canvas::undo() {
         color_[i] = saved.color[k];
         setColor16(int(i), color_[i]);
         heights_[i] = saved.heights[k];
+        if (saved.slot > 0 && materials_[saved.slot].mask.size() > i) {
+          materials_[saved.slot].mask[i] = saved.mask[k];
+          if (!mask16_[saved.slot].empty()) mask16_[saved.slot][i] = uint16_t(saved.mask[k] * 257);
+        }
       }
+    if (saved.slot > 0) changedMasks_ |= 1u << saved.slot;
     savedIn_[saved.tile] = 0;
     markChanged(saved.tile);
   }

@@ -26,8 +26,8 @@ add_library(bildhauer_core
 target_include_directories(bildhauer_core PUBLIC src)
 
 if(WIN32)
-  add_executable(bildhauer WIN32 src/app/main.cpp)
-  target_link_libraries(bildhauer PRIVATE bildhauer_core opengl32 comdlg32)
+  add_executable(bildhauer WIN32 src/app/main.cpp src/app/gl2.cpp src/app/matcaps.cpp)
+  target_link_libraries(bildhauer PRIVATE bildhauer_core opengl32 comdlg32 windowscodecs ole32)
   target_compile_definitions(bildhauer PRIVATE WIN32_LEAN_AND_MEAN)
 endif()
 

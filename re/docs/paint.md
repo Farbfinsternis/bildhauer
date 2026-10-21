@@ -59,6 +59,10 @@ stored in .sc1 (decision 2026-10-18).
 11. **arrange patches** (0x420CC0; "arrange - build polygons", "fit
     polygons", "rotate", "invert matrices"): packs the flattened patches
     into the atlas **[open]**.
+    After the mapping is built, the patch frames are not used again: baking
+    only checks each triangle's patch id ("### invalid patch_id in
+    baketexels"). They are saved with the file **[likely: nothing else reads
+    them]**.
 12. **calculate texmap size** and **scale vertices** (0x41F9F0, factor
     0.48 / largest extent) **[open in detail]**.
 13. UV deformation mode (option "UV deformation mode (use right before
@@ -245,10 +249,18 @@ Slot 0 is the base material and covers the whole model. Every further slot
 in use and not hidden is a **layer**: the mesh is drawn again with that
 slot's matcap, and the alpha comes from the slot's mask (texture unit 3,
 read in color-map UV). So a layer shows its matcap where its mask is
-painted. With **Edit** (slot > 0) the color tool paints into that slot's
+painted. The layer pass uses the same hard-light mix as the base pass,
+only with the slot's matcap; the mask texture is uploaded with
+`alpha = min(255, mask · 33 / 32)` (0x4437E0), so a mask byte of 248 or
+more is fully opaque. With **Edit** (slot > 0) the color tool paints into that slot's
 mask instead of the color layer ("Edit material mask"; 0x423500 /
-0x4233F0 switch the target). If the texture resolution changes, the masks
-are freed.
+0x4233F0 switch the target): the mask is expanded into a gray image that
+takes the place of the color layer, with its own 16-bit planes, while the
+primary and secondary colors are set aside. If the texture resolution
+changes, the masks are freed.
+
+On loading, the matcap of a slot is read from the stored file name (an
+absolute path into Sculptris' `materials` folder in the samples).
 
 ## 5. Open points
 

@@ -16,10 +16,12 @@
 // Deviations where the docs leave things open or Sculptris overflows: heights
 // are clamped to [0, 2^31) instead of wrapping; with symmetry (one texture for
 // both halves) a texel is painted from the nearer of its two images; bump
-// normals ignore neighbors outside the charts. Not yet
+// normals ignore neighbors outside the charts. Material slots (paint.md
+// 4.2) keep a mask per layer, painted like the color layer. Not yet
 // implemented: brush mask/texture, heightmask, paint mask, Combine color and
 // bump, Airbrush, Fill/Clear.
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <string>
@@ -33,6 +35,7 @@ namespace bh {
 
 constexpr int kTileSize = 64;
 constexpr int32_t kNeutralHeight = 1 << 28;
+constexpr int kMaxMaterials = 16;
 
 struct Texels {
   int width = 0, height = 0;
@@ -72,6 +75,22 @@ struct PaintSettings {
   uint32_t secondary = 0xDD6622;  // RGB 34, 102, 221
   float spacingFactor = 0.25f;
   bool angleFalloff = true;  // "Surface angle falloff"
+  // 0: the color layer. n > 0: Paint color edits the mask of material slot n
+  // instead ("Edit material mask"), the primary color showing the layer,
+  // the secondary (Ctrl) hiding it.
+  int target = 0;
+};
+
+// Material slot (paint.md 4.2). Slot 0 is the base material and covers the
+// whole model; every further slot in use is a layer whose matcap shows where
+// its mask is painted.
+struct Material {
+  bool used = false;
+  std::string matcap;         // name of a built-in matcap, or an image path
+  bool colored = false;       // keep the matcap's colors (else converted to gray)
+  bool additive = false;      // layer blending: additive instead of alpha
+  bool hidden = false;
+  std::vector<uint8_t> mask;  // per texel
 };
 
 class Canvas {
@@ -91,6 +110,14 @@ class Canvas {
   const std::vector<int32_t>& heights() const { return heights_; }
   const std::vector<uint8_t>& normalImage() const { return normals_; }  // RGB, see paint.md 3.4
 
+  // Slot 0 starts in use with a full mask; the caller names its matcap.
+  const Material& material(int slot) const { return materials_[slot]; }
+  Material& material(int slot) { return materials_[slot]; }
+  // Takes a material; a mask of another size is resampled to the canvas.
+  void setMaterial(int slot, Material m, int maskWidth, int maskHeight);
+  // The first free slot as a new layer with an empty mask, or -1.
+  int addLayer(const std::string& matcap);
+
   // One dab at a visible surface point (mirror side included).
   void dab(const Vec3& center, const PaintSettings& s);
 
@@ -99,6 +126,8 @@ class Canvas {
   std::vector<int> takeChangedTiles();
   int tilesX() const { return tilesX_; }
   int tilesY() const { return tilesY_; }
+  // Material slots whose masks changed since the last call (bit per slot).
+  uint32_t takeChangedMasks();
 
   // Undo works in steps; a stroke is one step. Tiles are saved before their
   // first change in a step.
@@ -106,7 +135,7 @@ class Canvas {
   bool undo();
 
  private:
-  void touchTile(int tile);
+  void touchTile(int tile, int slot);
   void markChanged(int tile);
   void updateNormals(int tile);
   void setColor16(int texel, uint32_t rgba);
@@ -119,6 +148,9 @@ class Canvas {
   std::vector<uint16_t> r16_, g16_, b16_;
   std::vector<int32_t> heights_;
   std::vector<uint8_t> normals_;
+  std::array<Material, kMaxMaterials> materials_;
+  std::array<std::vector<uint16_t>, kMaxMaterials> mask16_;  // 16-bit planes of masks being painted
+  uint32_t changedMasks_ = 0;
 
   int tilesX_ = 0, tilesY_ = 0;
   std::vector<char> changed_;
@@ -128,6 +160,8 @@ class Canvas {
     int tile;
     std::vector<uint32_t> color;
     std::vector<int32_t> heights;
+    int slot;  // > 0: the tile of that slot's mask
+    std::vector<uint8_t> mask;
   };
   std::deque<std::vector<SavedTile>> undo_;
   std::vector<uint32_t> savedIn_;  // per tile: undo step it was saved in

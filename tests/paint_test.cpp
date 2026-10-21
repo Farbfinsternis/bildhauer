@@ -1,6 +1,8 @@
 // Paint mode: texel baking and the range query on every sample, then color,
 // bump and flatten dabs, normals, undo and symmetry against the formulas of
-// re/docs/paint.md 3; stored images of painted files load unchanged.
+// re/docs/paint.md 3; material masks; tangents; saving paint data (a stored
+// texturing block re-encodes byte-identically, painted canvases survive a
+// save and load); stored images of painted files load unchanged.
 //
 // Usage: paint_test <file.sc1>...
 
@@ -213,6 +215,120 @@ void testDabs(const Mesh& m, const TextureMapping& map) {
   }
 }
 
+void testMasks(const Mesh& m, const TextureMapping& map) {
+  Canvas canvas(m, map, kSize, kSize);
+  const Texels& tx = canvas.texels();
+  Vec3 center;
+  const float diag = length(bboxDiagonal(m, &center));
+  PaintSettings s;
+  s.radius = diag * 0.04f;
+  s.strength = 1.97f;
+  s.hardness = 1.0f;
+  const int c = centerTexel(m, tx, s.radius * 1.3f);
+  if (c < 0) return;
+  check(canvas.material(0).used && canvas.material(0).mask[c] == 255, "masks: slot 0 covers everything");
+  const int slot = canvas.addLayer("layer");
+  check(slot == 1 && canvas.material(1).mask[c] == 0, "masks: a new layer starts empty");
+  canvas.takeChangedMasks();
+  const std::vector<uint32_t> color = canvas.colorImage();
+  s.target = slot;
+  canvas.beginUndoStep();
+  canvas.dab(tx.pos[c], s);
+  check(canvas.material(slot).mask[c] == 255 && canvas.colorImage() == color,
+        "masks: Paint color with a target paints the mask, not the color");
+  check(canvas.takeChangedMasks() == 1u << slot, "masks: the changed mask is reported");
+  s.strength = -s.strength;
+  canvas.dab(tx.pos[c], s);
+  check(canvas.material(slot).mask[c] == 0, "masks: inverted erases the mask");
+  canvas.undo();
+  check(canvas.material(slot).mask[c] == 0 && canvas.takeChangedMasks() == 1u << slot,
+        "masks: undo restores the mask");
+}
+
+void testTangents(const Mesh& m, const TextureMapping& map) {
+  std::vector<Tangent> tan = computeTangents(m, map);
+  int bad = 0, wrongWay = 0, total = 0;
+  for (size_t i = 0; i < tan.size(); ++i) {
+    const Vec3& n = m.vertex(map.texverts[i].vertex).normal;
+    if (std::fabs(length(tan[i].t) - 1) > 1e-3f || std::fabs(dot(tan[i].t, n)) > 1e-3f) ++bad;
+  }
+  // Per triangle: t points along +u and w * cross(n, t) along +v.
+  for (int t = 0; t < m.triangleSlots(); ++t) {
+    const auto& c = map.corners[t];
+    if (!m.triangle(t).active || c[0] < 0) continue;
+    const TexVert &a = map.texverts[c[0]], &b = map.texverts[c[1]], &d = map.texverts[c[2]];
+    const Vec3 e1 = m.vertex(b.vertex).pos - m.vertex(a.vertex).pos, e2 = m.vertex(d.vertex).pos - m.vertex(a.vertex).pos;
+    const float u1 = b.u - a.u, v1 = b.v - a.v, u2 = d.u - a.u, v2 = d.v - a.v, det = u1 * v2 - u2 * v1;
+    if (std::fabs(det) < 1e-12f) continue;
+    const Vec3 pu = (e1 * v2 - e2 * v1) / det, pv = (e2 * u1 - e1 * u2) / det;
+    const Tangent& tg = tan[c[0]];
+    const Vec3 n = m.vertex(a.vertex).normal;
+    ++total;
+    if (dot(tg.t, pu) <= 0 || dot(cross(n, tg.t) * tg.w, pv) <= 0) ++wrongWay;
+  }
+  check(bad == 0, "tangents: unit length, orthogonal to the normal");
+  check(wrongWay <= total / 100, "tangents: along +u and +v (" + std::to_string(wrongWay) + " of " +
+                                     std::to_string(total) + " triangles off)");
+}
+
+// Paints, adds a layer, saves with paint data, loads again: everything back.
+void testSave(const Mesh& m, const TextureMapping& map, const Sc1File& original) {
+  Canvas canvas(m, map, kSize, kSize);
+  canvas.material(0).matcap = "bildhauer:clay";
+  const Texels& tx = canvas.texels();
+  Vec3 center;
+  const float diag = length(bboxDiagonal(m, &center));
+  PaintSettings s;
+  s.radius = diag * 0.05f;
+  const int c = centerTexel(m, tx, s.radius * 1.3f);
+  if (c < 0) return;
+  canvas.dab(tx.pos[c], s);
+  s.tool = PaintTool::Bump;
+  canvas.dab(tx.pos[c], s);
+  const int slot = canvas.addLayer("bildhauer:gold");
+  canvas.material(slot).additive = true;
+  s.tool = PaintTool::Color;
+  s.target = slot;
+  canvas.dab(tx.pos[c], s);
+
+  Sc1File file = original;
+  meshToSc1(m, file, map, canvas);
+  std::vector<uint8_t> data;
+  std::string err;
+  Sc1File back;
+  Mesh mb;
+  Sc1Texturing tex;
+  TextureMapping mapBack;
+  bool ok = writeSc1(file, data, &err) && readSc1(data, back, &err) && sc1ToMesh(back, mb, &err) &&
+            decodeTexturing(back, tex, &err) && texturingToMapping(tex, mb, mapBack, &err);
+  check(ok, "save: paint data written and read back" + (err.empty() ? "" : " (" + err + ")"));
+  if (!ok) return;
+  Canvas loaded(mb, mapBack, tex.color.w, tex.color.h);
+  ok = texturingToCanvas(tex, loaded, &err);
+  check(ok, "save: canvas loads" + (err.empty() ? "" : " (" + err + ")"));
+  if (!ok) return;
+  check(loaded.colorImage() == canvas.colorImage() && loaded.heights() == canvas.heights(), "save: images identical");
+  bool masks = true;
+  for (int k = 0; k < kMaxMaterials; ++k) {
+    const Material &a = canvas.material(k), &b = loaded.material(k);
+    if (a.used != b.used || (a.used && (a.matcap != b.matcap || a.mask != b.mask || a.colored != b.colored ||
+                                        a.additive != b.additive || a.hidden != b.hidden)))
+      masks = false;
+  }
+  check(masks, "save: material slots identical");
+  bool uvs = mapBack.texverts.size() == map.texverts.size() && mapBack.numCharts == map.numCharts;
+  for (size_t i = 0; uvs && i < map.texverts.size(); ++i)
+    uvs = mapBack.texverts[i].u == map.texverts[i].u && mapBack.texverts[i].v == map.texverts[i].v;
+  for (int t = 0; uvs && t < m.triangleSlots(); ++t)
+    uvs = mapBack.corners[t] == map.corners[t] && mapBack.chart[t] == map.chart[t];
+  check(uvs, "save: UVs, corners and charts identical");
+  // Saving the loaded file again gives the same bytes.
+  Sc1File again = back;
+  meshToSc1(mb, again, mapBack, loaded);
+  std::vector<uint8_t> data2;
+  check(writeSc1(again, data2, &err) && data2 == data, "save: a second save is byte-identical");
+}
+
 void testFile(const std::string& path) {
   std::printf("%s\n", path.c_str());
   std::vector<uint8_t> data;
@@ -231,6 +347,9 @@ void testFile(const std::string& path) {
   testBake(m, map, canvas);
   testGrid(m, canvas.texels());
   testDabs(m, map);
+  testMasks(m, map);
+  testTangents(m, map);
+  testSave(m, map, file);
 
   if (file.hasTexturing) {
     Sc1Texturing tex;
@@ -250,6 +369,11 @@ void testFile(const std::string& path) {
     for (size_t i = 0; i < tex.color.pixels.size(); ++i)
       if (painted.colorImage()[i] != uint32_t(tex.color.pixels[i])) same = false;
     check(same && painted.heights() == tex.bump.pixels, "stored images kept unchanged");
+    std::vector<uint8_t> encoded;
+    encodeTexturing(tex, encoded);
+    check(encoded == file.texturing, "stored texturing block re-encodes byte-identically");
+    TextureMapping storedMap = stored;
+    testTangents(m, storedMap);
   }
 }
 

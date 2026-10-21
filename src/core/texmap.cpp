@@ -185,6 +185,7 @@ TextureMapping buildAtlas(const Mesh& m, const AtlasSettings& s) {
   map.corners.assign(nt, {-1, -1, -1});
 
   std::vector<Chart> charts(map.numCharts);
+  map.frames.resize(map.numCharts);
   for (int t = 0; t < nt; ++t)
     if (map.chart[t] >= 0) charts[map.chart[t]].tris.push_back(t);
 
@@ -232,7 +233,13 @@ TextureMapping buildAtlas(const Mesh& m, const AtlasSettings& s) {
       minY = std::min(minY, ry);
       maxY = std::max(maxY, ry);
     }
+    ChartFrame& frame = map.frames[c];
+    Vec3 axisX = u * ca + v * sa, axisY = v * ca - u * sa;
+    frame.center = (u * float(mx) + v * float(my)) + n * dot(m.vertex(ch.verts[0]).pos, n);
     if (maxY - minY > maxX - minX) {  // quarter turn: (x, y) -> (-y, x)
+      Vec3 x = -axisY;
+      axisY = axisX;
+      axisX = x;
       for (size_t i = 0; i < nv; ++i) {
         float rx = -ch.y[i], ry = ch.x[i];
         ch.x[i] = rx;
@@ -250,6 +257,7 @@ TextureMapping buildAtlas(const Mesh& m, const AtlasSettings& s) {
     }
     ch.w = maxX - minX;
     ch.h = maxY - minY;
+    frame.axes = {axisX, axisY, n};
 
     // Texverts of this chart, in vertex order.
     const int base = int(map.texverts.size());
@@ -274,6 +282,8 @@ TextureMapping buildAtlas(const Mesh& m, const AtlasSettings& s) {
   }
   pack(charts, order, lo, s.size, pad);
 
+  for (int c = 0; c < map.numCharts; ++c)
+    map.frames[c].uvOrigin = {(charts[c].px + pad) / float(s.size), (charts[c].py + pad) / float(s.size), 0};
   int base = 0;
   for (Chart& ch : charts) {
     for (size_t i = 0; i < ch.verts.size(); ++i) {
@@ -284,6 +294,39 @@ TextureMapping buildAtlas(const Mesh& m, const AtlasSettings& s) {
     base += int(ch.verts.size());
   }
   return map;
+}
+
+std::vector<Tangent> computeTangents(const Mesh& m, const TextureMapping& map) {
+  const size_t n = map.texverts.size();
+  std::vector<Vec3> du(n), dv(n);
+  const int nt = std::min(m.triangleSlots(), int(map.corners.size()));
+  for (int t = 0; t < nt; ++t) {
+    const auto& c = map.corners[t];
+    if (!m.triangle(t).active || c[0] < 0 || c[1] < 0 || c[2] < 0) continue;
+    const TexVert &a = map.texverts[c[0]], &b = map.texverts[c[1]], &d = map.texverts[c[2]];
+    const Vec3 e1 = m.vertex(b.vertex).pos - m.vertex(a.vertex).pos;
+    const Vec3 e2 = m.vertex(d.vertex).pos - m.vertex(a.vertex).pos;
+    const float u1 = b.u - a.u, v1 = b.v - a.v, u2 = d.u - a.u, v2 = d.v - a.v;
+    const float det = u1 * v2 - u2 * v1;
+    if (std::fabs(det) < 1e-20f) continue;
+    // dP/du and dP/dv of the triangle, weighted by its UV area (|det|).
+    const float sign = det > 0 ? 1.0f : -1.0f;
+    const Vec3 pu = (e1 * v2 - e2 * v1) * sign, pv = (e2 * u1 - e1 * u2) * sign;
+    for (int k : c) {
+      du[k] += pu;
+      dv[k] += pv;
+    }
+  }
+  std::vector<Tangent> out(n);
+  for (size_t i = 0; i < n; ++i) {
+    const int vi = map.texverts[i].vertex;
+    if (vi < 0 || vi >= m.vertexSlots()) continue;
+    const Vec3 nrm = m.vertex(vi).normal;
+    Vec3 t = normalize(du[i] - nrm * dot(nrm, du[i]));
+    if (length(t) == 0) t = normalize(cross(std::fabs(nrm.x) < 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0}, nrm));
+    out[i] = {t, dot(cross(nrm, t), dv[i]) < 0 ? -1.0f : 1.0f};
+  }
+  return out;
 }
 
 AtlasStats atlasStats(const Mesh& m, const TextureMapping& map) {

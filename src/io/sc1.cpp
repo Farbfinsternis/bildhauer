@@ -64,6 +64,29 @@ class Writer {
     auto b = static_cast<const uint8_t*>(p);
     o_.insert(o_.end(), b, b + n);
   }
+  // WriteBufferRLE (sc1-format.md "RLE"): literal and run segments
+  // alternate, starting with a literal, each led by a u8 count of at most
+  // 255. A literal ends before an element equal to its predecessor, which
+  // opens the run; the last element of the buffer stays in a literal. A run
+  // ends at the first different element.
+  template <class T>
+  void rle(const std::vector<T>& a) {
+    const size_t n = a.size();
+    size_t i = 0;
+    bool literal = true;
+    while (i < n) {
+      const size_t start = i;
+      if (literal) {
+        while (i < n && i - start < 255 && !(i > 0 && a[i] == a[i - 1] && i + 1 < n)) ++i;
+        u8(uint8_t(i - start));
+        for (size_t k = start; k < i; ++k) raw(&a[k], sizeof(T));
+      } else {
+        while (i < n && i - start < 255 && a[i] == a[i - 1]) ++i;
+        u8(uint8_t(i - start));
+      }
+      literal = !literal;
+    }
+  }
 
  private:
   std::vector<uint8_t>& o_;
@@ -227,6 +250,9 @@ bool decodeTexturing(const Sc1File& f, Sc1Texturing& out, std::string* error) {
   }
   if (!r.ok()) return fail(error, "truncated texturing block");
   for (size_t t = 0; t < numTris; ++t)
+    if (out.triPatch[t] < 0 || out.triPatch[t] >= numPatches)
+      return fail(error, "triangle " + std::to_string(t) + " has no patch");
+  for (size_t t = 0; t < numTris; ++t)
     for (int32_t i : out.triTexverts[t])
       if (i < 0 || i >= numTexverts) return fail(error, "triangle " + std::to_string(t) + " references texvert " + std::to_string(i));
   for (const auto& tv : out.texverts)
@@ -247,9 +273,132 @@ bool texturingToMapping(const Sc1Texturing& tex, const Mesh& mesh, TextureMappin
     if (!mesh.triangle(t).active) continue;
     for (int k = 0; k < 3; ++k) out.corners[t][k] = tex.triTexverts[t][k];
     out.chart[t] = tex.triPatch[t];
-    out.numCharts = std::max(out.numCharts, tex.triPatch[t] + 1);
+  }
+  out.numCharts = int(tex.patches.size());
+  for (const auto& p : tex.patches) out.frames.push_back({p.uvOrigin, p.center, p.axes});
+  return true;
+}
+
+bool texturingToCanvas(const Sc1Texturing& tex, Canvas& canvas, std::string* error) {
+  if (tex.color.w != canvas.width() || tex.color.h != canvas.height() || tex.bump.w != tex.color.w ||
+      tex.bump.h != tex.color.h)
+    return fail(error, "image sizes do not match the canvas");
+  if (!canvas.loadImages(tex.color.pixels, tex.bump.pixels, error)) return false;
+  for (const auto& m : tex.materials) {
+    if (m.slot < 0 || m.slot >= kMaxMaterials) return fail(error, "bad material slot " + std::to_string(m.slot));
+    Material mat;
+    mat.used = true;
+    mat.matcap.assign(m.name.data(), strnlen(m.name.data(), m.name.size()));
+    mat.colored = m.flags[0] != 0;
+    mat.additive = m.flags[1] != 0;
+    mat.hidden = m.flags[2] != 0;
+    mat.mask = m.mask;
+    canvas.setMaterial(m.slot, std::move(mat), m.w, m.h);
   }
   return true;
+}
+
+void encodeTexturing(const Sc1Texturing& tex, std::vector<uint8_t>& out) {
+  out.clear();
+  Writer w(out);
+  w.i32(int32_t(tex.patches.size()));
+  for (const auto& p : tex.patches) {
+    w.vec3(p.uvOrigin);
+    w.vec3(p.center);
+    for (const Vec3& a : p.axes) w.vec3(a);
+  }
+  w.i32(int32_t(tex.texverts.size()));
+  for (const auto& tv : tex.texverts) {
+    w.f32(tv.u);
+    w.f32(tv.v);
+    w.i32(tv.packedNormal);
+    w.i32(tv.vertex);
+  }
+  for (size_t t = 0; t < tex.triTexverts.size(); ++t) {
+    for (int32_t i : tex.triTexverts[t]) w.i32(i);
+    const int32_t p = t < tex.triPatch.size() ? tex.triPatch[t] : 0;
+    w.u8(uint8_t(p & 0xFF));
+    w.u8(uint8_t(p >> 8 & 0xFF));
+  }
+  for (const Sc1Texturing::Image* im : {&tex.color, &tex.bump}) {
+    w.i32(im->w);
+    w.i32(im->h);
+    w.rle(im->pixels);
+  }
+  w.i32(int32_t(tex.materials.size()));
+  for (const auto& m : tex.materials) {
+    w.i32(m.slot);
+    w.raw(m.name.data(), m.name.size());
+    w.raw(m.flags.data(), m.flags.size());
+    w.i32(m.w);
+    w.i32(m.h);
+    w.rle(m.mask);
+  }
+}
+
+namespace {
+
+// File index per vertex slot: active vertices in slot order (as meshToSc1).
+std::vector<int32_t> fileVertexIndices(const Mesh& mesh) {
+  std::vector<int32_t> index(mesh.vertexSlots(), -1);
+  int32_t next = 0;
+  for (int v = 0; v < mesh.vertexSlots(); ++v)
+    if (mesh.vertex(v).active) index[v] = next++;
+  return index;
+}
+
+// Packed vector (sc1-format.md): round(c * 125 + 128) per component.
+int32_t packNormal(const Vec3& n) {
+  auto c = [](float x) { return int32_t(std::lround(std::clamp(x, -1.0f, 1.0f) * 125 + 128)); };
+  return c(n.x) << 16 | c(n.y) << 8 | c(n.z);
+}
+
+}  // namespace
+
+void paintToTexturing(const Mesh& mesh, const TextureMapping& map, const Canvas& canvas, Sc1Texturing& out) {
+  out = Sc1Texturing{};
+  for (int c = 0; c < map.numCharts; ++c) {
+    Sc1Texturing::Patch p;
+    if (c < int(map.frames.size())) {
+      p.uvOrigin = map.frames[c].uvOrigin;
+      p.center = map.frames[c].center;
+      p.axes = map.frames[c].axes;
+    }
+    out.patches.push_back(p);
+  }
+  const std::vector<int32_t> index = fileVertexIndices(mesh);
+  for (const TexVert& tv : map.texverts) {
+    const bool ok = tv.vertex >= 0 && tv.vertex < mesh.vertexSlots() && mesh.vertex(tv.vertex).active;
+    out.texverts.push_back({tv.u, tv.v, packNormal(ok ? mesh.vertex(tv.vertex).normal : Vec3{}),
+                            ok ? index[tv.vertex] : 0});
+  }
+  for (int t = 0; t < mesh.triangleSlots(); ++t) {
+    if (!mesh.triangle(t).active) continue;
+    std::array<int32_t, 3> corners{0, 0, 0};
+    int32_t chart = 0;
+    if (t < int(map.corners.size()) && map.chart[t] >= 0) {
+      for (int k = 0; k < 3; ++k) corners[k] = std::max(map.corners[t][k], 0);
+      chart = map.chart[t];
+    }
+    out.triTexverts.push_back(corners);
+    out.triPatch.push_back(chart);
+  }
+  out.color.w = out.bump.w = canvas.width();
+  out.color.h = out.bump.h = canvas.height();
+  out.color.pixels.assign(canvas.colorImage().begin(), canvas.colorImage().end());
+  out.bump.pixels = canvas.heights();
+  for (int slot = 0; slot < kMaxMaterials; ++slot) {
+    const Material& m = canvas.material(slot);
+    if (!m.used) continue;
+    Sc1Texturing::Material o;
+    o.slot = slot;
+    std::memcpy(o.name.data(), m.matcap.data(), std::min(m.matcap.size(), o.name.size() - 1));
+    o.flags = {uint8_t(m.colored), uint8_t(m.additive), uint8_t(m.hidden)};
+    o.w = canvas.width();
+    o.h = canvas.height();
+    o.mask = m.mask;
+    out.materials.push_back(std::move(o));
+  }
 }
 
 bool writeSc1(const Sc1File& f, std::vector<uint8_t>& out, std::string* error) {
@@ -363,6 +512,14 @@ void meshToSc1(const Mesh& mesh, Sc1File& f) {
   f.polyList = std::move(polyList);
   f.hasTexturing = 0;
   f.texturing.clear();
+}
+
+void meshToSc1(const Mesh& mesh, Sc1File& f, const TextureMapping& map, const Canvas& canvas) {
+  meshToSc1(mesh, f);
+  Sc1Texturing tex;
+  paintToTexturing(mesh, map, canvas, tex);
+  encodeTexturing(tex, f.texturing);
+  f.hasTexturing = 1;
 }
 
 }  // namespace bh

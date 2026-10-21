@@ -8,7 +8,9 @@ Reconstructed from `Sculptris.exe` (Alpha 6, build 2015-04-21, MSVC 2008, x86):
 **Validation:** all four v8 sample files (`default_sphere`, `default_plane`,
 `figure`, `head`) and a painted test file (default sphere with color paint
 and one matcap, `re/_work/models/test01.sc1`, local only) are read to the
-last byte and written back byte-identical. That covers the texturing block
+last byte and written back byte-identical. bildhauer's own C++ writer
+(`encodeTexturing`, written from this description) re-encodes the painted
+sample's texturing block byte for byte as well. That covers the texturing block
 and the RLE encoder.
 The v0 file `snok.sc1` is read completely. After mirroring, every mesh is a
 closed, consistently oriented 2-manifold (each edge has exactly 2 triangles,

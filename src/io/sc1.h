@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/mesh.h"
+#include "core/paint.h"
 #include "core/texmap.h"
 #include "core/vec3.h"
 
@@ -79,6 +80,18 @@ bool decodeTexturing(const Sc1File& file, Sc1Texturing& out, std::string* error)
 // slot = file triangle; patch = chart).
 bool texturingToMapping(const Sc1Texturing& tex, const Mesh& mesh, TextureMapping& out, std::string* error);
 
+// Puts the stored images and material slots into a canvas of the images'
+// size.
+bool texturingToCanvas(const Sc1Texturing& tex, Canvas& canvas, std::string* error);
+
+// The texturing block in the layout of extension version 8.
+void encodeTexturing(const Sc1Texturing& tex, std::vector<uint8_t>& out);
+
+// Paint data of a mesh as meshToSc1 writes it: texverts refer to file
+// vertices, triangles in file order, charts as patches, packed vertex
+// normals.
+void paintToTexturing(const Mesh& mesh, const TextureMapping& map, const Canvas& canvas, Sc1Texturing& out);
+
 bool readSc1(const std::vector<uint8_t>& data, Sc1File& out, std::string* error);
 bool writeSc1(const Sc1File& file, std::vector<uint8_t>& out, std::string* error);
 
@@ -94,5 +107,7 @@ bool sc1ToMesh(const Sc1File& file, Mesh& mesh, std::string* error);
 // order). Extension values are kept; paint data is dropped, since it no
 // longer matches the topology.
 void meshToSc1(const Mesh& mesh, Sc1File& file);
+// The same with paint data.
+void meshToSc1(const Mesh& mesh, Sc1File& file, const TextureMapping& map, const Canvas& canvas);
 
 }  // namespace bh

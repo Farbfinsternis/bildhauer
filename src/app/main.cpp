@@ -6,7 +6,8 @@
 //                             --frames also writes the mean frame time to out.png.txt
 //
 //                             (--paint: in paint mode, with paint strokes;
-//                             --bump-normals: show the bump normal map)
+//                             --bump-normals: show the bump normal map;
+//                             --save: save as with Ctrl+S before rendering)
 //
 // Mouse: LMB sculpt (Ctrl inverts; with Mask: Ctrl unmasks; Shift smooths),
 // RMB or Alt+LMB orbit, MMB pan, wheel zoom.
@@ -18,11 +19,16 @@
 // Paint mode: LMB paints (Ctrl: secondary color / lower / away from neutral);
 // D Paint color, B Paint bump, F Flatten bump; [ ] size, with Ctrl strength,
 // with Shift hardness; K primary color, Shift+K secondary; N shows the bump
-// normal map; Ctrl+Z undo. Files with paint data open in paint mode.
+// normal map; Ctrl+Z undo; Ctrl+S saves with paint data. Materials: L adds a
+// layer, 0-9 choose what Paint color paints (0 the color, n the mask of
+// layer n), M cycles the built-in matcaps of the current slot, O loads a
+// matcap image for it, C toggles Colored, A additive, H hides the layer.
+// Files with paint data open in paint mode.
 
 #include <windows.h>
 #include <windowsx.h>
 #include <commdlg.h>
+#include <objbase.h>
 
 #include <GL/gl.h>
 
@@ -37,6 +43,8 @@
 #include <utility>
 #include <vector>
 
+#include "app/gl2.h"
+#include "app/matcaps.h"
 #include "core/brush.h"
 #include "core/brush_params.h"
 #include "core/mesh.h"
@@ -97,15 +105,23 @@ struct App {
   std::unique_ptr<PaintStroke> paintStroke;
   PaintSettings paint;
   std::array<std::array<float, 3>, 3> paintSliders{};  // per tool: size, strength, hardness
+  std::vector<Tangent> tangents;  // per texvert
+  int editSlot = 0;  // what Paint color paints: 0 the color layer, n the mask of material slot n
   bool showBumpNormals = false;
   bool uploadAll = false;  // the canvas is new: upload whole textures
   GLuint colorTex = 0, normalTex = 0;
+  struct SlotTextures {
+    GLuint matcap = 0, mask = 0;
+    std::string key;  // matcap name and gray/colored it was made for
+  };
+  std::array<SlotTextures, kMaxMaterials> slotTex;
+  GLuint paintShader = 0;  // 0: no OpenGL 2.0, a stand-in shading is used
 
   bool wireframe = false;
   int mouseX = 0, mouseY = 0;
   bool orbiting = false, panning = false;
   PickHit hover;
-  GLuint matcap = 0, matcapGray = 0;
+  GLuint matcap = 0;
   std::string status;
 };
 
@@ -174,16 +190,13 @@ bool loadModel(const std::string& path) {
     Sc1Texturing tex;
     std::unique_ptr<Canvas> canvas;
     bool ok = decodeTexturing(app.file, tex, &err) && texturingToMapping(tex, app.mesh, app.texmap, &err);
-    if (ok && (tex.bump.w != tex.color.w || tex.bump.h != tex.color.h)) {
-      ok = false;
-      err = "color and bump images differ in size";
-    }
     if (ok) {
       canvas = std::make_unique<Canvas>(app.mesh, app.texmap, tex.color.w, tex.color.h);
-      ok = canvas->loadImages(tex.color.pixels, tex.bump.pixels, &err);
+      ok = texturingToCanvas(tex, *canvas, &err);
     }
     if (ok) {
       app.canvas = std::move(canvas);
+      app.tangents = computeTangents(app.mesh, app.texmap);
       app.paintMode = true;
       app.uploadAll = true;
     } else {
@@ -194,14 +207,11 @@ bool loadModel(const std::string& path) {
 }
 
 void saveModel() {
-  if (app.paintMode) {  // meshToSc1 would drop the paint data
-    app.status = "saving paint data is not implemented yet";
-    return;
-  }
   std::string out = app.path.empty() ? std::string("untitled") : app.path;
   if (out.size() > 4 && out.substr(out.size() - 4) == ".sc1") out.resize(out.size() - 4);
   out += "_bildhauer.sc1";
-  meshToSc1(app.mesh, app.file);
+  if (app.paintMode) meshToSc1(app.mesh, app.file, app.texmap, *app.canvas);
+  else meshToSc1(app.mesh, app.file);
   std::vector<uint8_t> data;
   std::string err;
   bool ok = writeSc1(app.file, data, &err) && writeBinaryFile(out, data);
@@ -224,6 +234,9 @@ void enterPaintMode() {
   app.undo.clear();
   app.texmap = buildAtlas(app.mesh, {kPaintTextureSize});
   app.canvas = std::make_unique<Canvas>(app.mesh, app.texmap, kPaintTextureSize, kPaintTextureSize);
+  app.canvas->material(0).matcap = builtinMatcaps()[0];
+  app.tangents = computeTangents(app.mesh, app.texmap);
+  app.editSlot = 0;
   app.paintMode = true;
   app.uploadAll = true;
   char msg[128];
@@ -234,81 +247,140 @@ void enterPaintMode() {
 
 // --- rendering ---------------------------------------------------------------
 
-GLuint makeTexture(int w, int h, GLenum format, const void* data) {
+GLuint makeTexture(int w, int h, GLint internal, GLenum format, const void* data) {
   GLuint tex = 0;
   glGenTextures(1, &tex);
   glBindTexture(GL_TEXTURE_2D, tex);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gl2::kClampToEdge);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gl2::kClampToEdge);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, format, GL_UNSIGNED_BYTE, data);
+  glTexImage2D(GL_TEXTURE_2D, 0, internal, w, h, 0, format, GL_UNSIGNED_BYTE, data);
   return tex;
 }
 
-// A neutral clay matcap, computed (no image assets). Gray: converted as
-// Sculptris does for paint mode, (2R + 3G + B) / 6, so the paint shows
-// through.
-GLuint makeMatcap(bool gray) {
-  const int n = 256;
-  std::vector<unsigned char> px(n * n * 3);
-  const Vec3 light = normalize({-0.45f, 0.65f, 0.6f});
-  const Vec3 base{0.80f, 0.66f, 0.56f};
-  for (int y = 0; y < n; ++y) {
-    for (int x = 0; x < n; ++x) {
-      float u = (x + 0.5f) / n * 2 - 1, v = (y + 0.5f) / n * 2 - 1;
-      float r2 = std::fmin(u * u + v * v, 1.0f);
-      Vec3 nrm{u, v, std::sqrt(1 - r2)};
-      float diff = std::fmax(0.0f, dot(nrm, light));
-      Vec3 refl = nrm * (2 * dot(nrm, light)) - light;
-      float spec = std::pow(std::fmax(0.0f, refl.z), 24.0f);
-      float rim = std::pow(1 - nrm.z, 3.0f) * 0.25f;
-      Vec3 c = base * (0.22f + 0.78f * diff) + Vec3{1, 1, 1} * (0.3f * spec + rim);
-      c = {std::fmin(c.x, 1.0f), std::fmin(c.y, 1.0f), std::fmin(c.z, 1.0f)};
-      if (gray) {
-        float g = (2 * c.x + 3 * c.y + c.z) / 6;
-        c = {g, g, g};
-      }
-      unsigned char* o = &px[(y * n + x) * 3];
-      o[0] = (unsigned char)(c.x * 255);
-      o[1] = (unsigned char)(c.y * 255);
-      o[2] = (unsigned char)(c.z * 255);
-    }
-  }
-  return makeTexture(n, n, GL_RGB, px.data());
+// A matcap texture; an image that cannot be read falls back to clay.
+GLuint matcapTexture(const std::string& name, bool gray, std::string* error) {
+  MatcapImage im;
+  if (!loadMatcap(name, gray, im, error)) loadMatcap(builtinMatcaps()[0], gray, im, nullptr);
+  return makeTexture(im.width, im.height, GL_RGB8, GL_RGB, im.rgb.data());
 }
 
-// Brings the color and normal textures up to date with the canvas: all of
-// it after a new canvas, otherwise the changed tiles.
+// Paint shading (paint.md 4.1), bildhauer's own shaders. The bump normal map
+// is sampled half a texel up and left of the color map, since it is a
+// forward difference; it bends the normal in the tangent frame. The
+// view-space normal picks the matcap value m, which lights the paint color
+// like a hard-light layer. A layer pass takes its alpha from the slot's mask
+// (uploaded as min(255, mask * 33 / 32)).
+const char* kPaintVertexShader = R"(
+#version 110
+attribute vec4 tangent;
+uniform float mirror;  // -1 on the mirrored half: flips the tangent frame's handedness
+varying vec3 vNormal;
+varying vec4 vTangent;
+void main() {
+  gl_Position = ftransform();
+  vNormal = gl_NormalMatrix * gl_Normal;
+  vTangent = vec4(gl_NormalMatrix * tangent.xyz, tangent.w * mirror);
+  gl_TexCoord[0] = gl_MultiTexCoord0;
+}
+)";
+
+const char* kPaintFragmentShader = R"(
+#version 110
+uniform sampler2D colorMap, normalMap, matcap, mask;
+uniform vec2 texel;
+uniform float useMask;
+varying vec3 vNormal;
+varying vec4 vTangent;
+void main() {
+  vec2 uv = gl_TexCoord[0].st;
+  vec3 n = normalize(vNormal);
+  vec3 t = normalize(vTangent.xyz - n * dot(n, vTangent.xyz));
+  vec3 b = cross(n, t) * vTangent.w;
+  vec3 tn = texture2D(normalMap, uv - 0.5 * texel).xyz * 2.0 - 1.0;
+  vec3 s = normalize(t * tn.x + b * tn.y + n * tn.z);
+  vec3 m = texture2D(matcap, s.xy * 0.495 + 0.5).rgb;
+  vec3 c = texture2D(colorMap, uv).rgb;
+  vec3 mult = min(2.0 * m, 1.0);
+  vec3 screen = max(2.0 * m - 1.0, 0.0);
+  float a = useMask > 0.5 ? min(texture2D(mask, uv).r * 33.0 / 32.0, 1.0) : 1.0;
+  gl_FragColor = vec4((1.0 - (1.0 - c) * (1.0 - screen)) * mult, a);
+}
+)";
+
+void initPaintShader() {
+  std::string err;
+  if (!gl2::load()) {
+    app.status = "no OpenGL 2.0: paint shading without bump";
+    return;
+  }
+  app.paintShader = gl2::buildProgram(kPaintVertexShader, kPaintFragmentShader, "tangent", &err);
+  if (!app.paintShader) app.status = "paint shader: " + err;
+}
+
+// Brings the textures up to date with the canvas: color and normal maps
+// (all of them after a new canvas, otherwise the changed tiles), and per
+// material slot its matcap and mask.
 void syncPaintTextures() {
   Canvas& cv = *app.canvas;
   std::vector<int> tiles = cv.takeChangedTiles();  // also updates their normals
+  uint32_t masks = cv.takeChangedMasks();
   if (app.uploadAll) {
     if (app.colorTex) glDeleteTextures(1, &app.colorTex);
     if (app.normalTex) glDeleteTextures(1, &app.normalTex);
-    app.colorTex = makeTexture(cv.width(), cv.height(), GL_RGBA, cv.colorImage().data());
-    app.normalTex = makeTexture(cv.width(), cv.height(), GL_RGB, cv.normalImage().data());
+    app.colorTex = makeTexture(cv.width(), cv.height(), GL_RGB8, GL_RGBA, cv.colorImage().data());
+    app.normalTex = makeTexture(cv.width(), cv.height(), GL_RGB8, GL_RGB, cv.normalImage().data());
+    for (auto& st : app.slotTex)
+      if (st.mask) glDeleteTextures(1, &st.mask), st.mask = 0;
     app.uploadAll = false;
-    return;
+    tiles.clear();
   }
-  if (tiles.empty()) return;
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, cv.width());
-  for (int pass = 0; pass < 2; ++pass) {
-    glBindTexture(GL_TEXTURE_2D, pass == 0 ? app.colorTex : app.normalTex);
-    for (int t : tiles) {
-      const int x0 = (t % cv.tilesX()) * kTileSize, y0 = (t / cv.tilesX()) * kTileSize;
-      const int w = std::min(kTileSize, cv.width() - x0), h = std::min(kTileSize, cv.height() - y0);
-      glPixelStorei(GL_UNPACK_SKIP_PIXELS, x0);
-      glPixelStorei(GL_UNPACK_SKIP_ROWS, y0);
-      if (pass == 0) glTexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, cv.colorImage().data());
-      else glTexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, w, h, GL_RGB, GL_UNSIGNED_BYTE, cv.normalImage().data());
+  if (!tiles.empty()) {
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, cv.width());
+    for (int pass = 0; pass < 2; ++pass) {
+      glBindTexture(GL_TEXTURE_2D, pass == 0 ? app.colorTex : app.normalTex);
+      for (int t : tiles) {
+        const int x0 = (t % cv.tilesX()) * kTileSize, y0 = (t / cv.tilesX()) * kTileSize;
+        const int w = std::min(kTileSize, cv.width() - x0), h = std::min(kTileSize, cv.height() - y0);
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS, x0);
+        glPixelStorei(GL_UNPACK_SKIP_ROWS, y0);
+        if (pass == 0) glTexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, cv.colorImage().data());
+        else glTexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, w, h, GL_RGB, GL_UNSIGNED_BYTE, cv.normalImage().data());
+      }
+    }
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+  }
+  for (int slot = 0; slot < kMaxMaterials; ++slot) {
+    const Material& mt = cv.material(slot);
+    App::SlotTextures& st = app.slotTex[slot];
+    if (!mt.used) {
+      if (st.matcap) glDeleteTextures(1, &st.matcap);
+      if (st.mask) glDeleteTextures(1, &st.mask);
+      st = {};
+      continue;
+    }
+    const std::string key = mt.matcap + (mt.colored ? "|colored" : "|gray");
+    if (st.key != key) {
+      if (st.matcap) glDeleteTextures(1, &st.matcap);
+      std::string err;
+      st.matcap = matcapTexture(mt.matcap, !mt.colored, &err);
+      if (!err.empty()) app.status = err + " (shown as clay)";
+      st.key = key;
+    }
+    if (st.mask && !(masks >> slot & 1)) continue;
+    if (!st.mask) {
+      st.mask = makeTexture(cv.width(), cv.height(), GL_LUMINANCE8, GL_LUMINANCE, mt.mask.data());
+    } else {
+      glBindTexture(GL_TEXTURE_2D, st.mask);
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cv.width(), cv.height(), GL_LUMINANCE, GL_UNSIGNED_BYTE, mt.mask.data());
     }
   }
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-  glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-  glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 }
 
 void loadView() {
@@ -377,33 +449,42 @@ void drawMesh(bool mirrored) {
   glFrontFace(GL_CCW);
 }
 
-// Paint mode: one vertex per texvert, since UVs differ across charts. The
-// color map (or the bump normal map) goes down first, then the gray matcap
-// is laid over it with 2x modulation (dst * src * 2): matcap gray 0.5 keeps
-// the paint color, darker parts darken it, brighter parts lighten it. A
-// stand-in for the hard-light shading of paint.md 4.1 until there are
-// shaders; the bump does not shade yet.
+void bindUnit(int unit, GLuint tex) {
+  gl2::gl.ActiveTexture(gl2::kTexture0 + unit);
+  glBindTexture(GL_TEXTURE_2D, tex);
+}
+
+// Paint mode: one vertex per texvert, since UVs differ across charts. Slot 0
+// is drawn first, then every visible layer again with its own matcap and its
+// mask as alpha (normal or additive blending). Without OpenGL 2.0 a
+// stand-in: the color map times the base matcap with 2x modulation, no bump
+// and no layers.
 void drawPaintMesh(bool mirrored) {
   const Mesh& m = app.mesh;
   const TextureMapping& map = app.texmap;
   const Vec3 r = app.camera.right(), u = app.camera.up();
-  static std::vector<float> pos, uv, mc;
+  static std::vector<float> pos, nrm, uv, tan, mc;
   static std::vector<GLuint> idx;
   const size_t n = map.texverts.size();
   pos.assign(n * 3, 0);
+  nrm.assign(n * 3, 0);
   uv.resize(n * 2);
+  tan.assign(n * 4, 0);
   mc.assign(n * 2, 0.5f);
   for (size_t i = 0; i < n; ++i) {
     const TexVert& tv = map.texverts[i];
     if (tv.vertex < 0 || tv.vertex >= m.vertexSlots() || !m.vertex(tv.vertex).active) continue;
     const Vertex& v = m.vertex(tv.vertex);
-    Vec3 p = v.pos, nr = v.normal;
-    if (mirrored) { p.x = -p.x; nr.x = -nr.x; }
+    Vec3 p = v.pos, nr = v.normal, t = i < app.tangents.size() ? app.tangents[i].t : Vec3{};
+    if (mirrored) { p.x = -p.x; nr.x = -nr.x; t.x = -t.x; }
     pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
+    nrm[i * 3] = nr.x; nrm[i * 3 + 1] = nr.y; nrm[i * 3 + 2] = nr.z;
+    tan[i * 4] = t.x; tan[i * 4 + 1] = t.y; tan[i * 4 + 2] = t.z;
+    tan[i * 4 + 3] = i < app.tangents.size() ? app.tangents[i].w : 1;
     uv[i * 2] = tv.u;
     uv[i * 2 + 1] = tv.v;
-    mc[i * 2] = 0.5f + 0.49f * dot(nr, r);
-    mc[i * 2 + 1] = 0.5f + 0.49f * dot(nr, u);
+    mc[i * 2] = 0.5f + 0.495f * dot(nr, r);
+    mc[i * 2 + 1] = 0.5f + 0.495f * dot(nr, u);
   }
   idx.clear();
   const int nt = std::min(m.triangleSlots(), int(map.corners.size()));
@@ -412,29 +493,76 @@ void drawPaintMesh(bool mirrored) {
     if (m.triangle(t).active && c[0] >= 0 && c[1] >= 0 && c[2] >= 0)
       idx.insert(idx.end(), {GLuint(c[0]), GLuint(c[1]), GLuint(c[2])});
   }
+  const GLsizei count = GLsizei(idx.size());
+  const GLuint colorMap = app.showBumpNormals ? app.normalTex : app.colorTex;
   glEnableClientState(GL_VERTEX_ARRAY);
   glEnableClientState(GL_TEXTURE_COORD_ARRAY);
   glVertexPointer(3, GL_FLOAT, 0, pos.data());
   glFrontFace(mirrored ? GL_CW : GL_CCW);
-  glEnable(GL_TEXTURE_2D);
-  glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-  glDisable(GL_BLEND);
-  glBindTexture(GL_TEXTURE_2D, app.showBumpNormals ? app.normalTex : app.colorTex);
-  glTexCoordPointer(2, GL_FLOAT, 0, uv.data());
-  glDrawElements(GL_TRIANGLES, GLsizei(idx.size()), GL_UNSIGNED_INT, idx.data());
 
-  glEnable(GL_BLEND);
-  glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
-  glDepthFunc(GL_LEQUAL);
-  glDepthMask(GL_FALSE);
-  glBindTexture(GL_TEXTURE_2D, app.matcapGray);
-  glTexCoordPointer(2, GL_FLOAT, 0, mc.data());
-  glDrawElements(GL_TRIANGLES, GLsizei(idx.size()), GL_UNSIGNED_INT, idx.data());
-  glDepthMask(GL_TRUE);
-  glDepthFunc(GL_LESS);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-  glDisable(GL_TEXTURE_2D);
+  if (app.paintShader) {
+    using gl2::gl;
+    const GLuint prog = app.paintShader;
+    glEnableClientState(GL_NORMAL_ARRAY);
+    glNormalPointer(GL_FLOAT, 0, nrm.data());
+    glTexCoordPointer(2, GL_FLOAT, 0, uv.data());
+    gl.EnableVertexAttribArray(1);
+    gl.VertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, tan.data());
+    gl.UseProgram(prog);
+    gl.Uniform1i(gl.GetUniformLocation(prog, "colorMap"), 0);
+    gl.Uniform1i(gl.GetUniformLocation(prog, "normalMap"), 1);
+    gl.Uniform1i(gl.GetUniformLocation(prog, "matcap"), 2);
+    gl.Uniform1i(gl.GetUniformLocation(prog, "mask"), 3);
+    gl.Uniform2f(gl.GetUniformLocation(prog, "texel"), 1.0f / app.canvas->width(), 1.0f / app.canvas->height());
+    gl.Uniform1f(gl.GetUniformLocation(prog, "mirror"), mirrored ? -1.0f : 1.0f);
+    const GLint useMask = gl.GetUniformLocation(prog, "useMask");
+    bindUnit(0, colorMap);
+    bindUnit(1, app.normalTex);
+    bindUnit(2, app.slotTex[0].matcap);
+    gl.Uniform1f(useMask, 0);
+    glDisable(GL_BLEND);
+    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, idx.data());
+
+    glEnable(GL_BLEND);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+    gl.Uniform1f(useMask, 1);
+    for (int slot = 1; slot < kMaxMaterials; ++slot) {
+      const Material& mt = app.canvas->material(slot);
+      const App::SlotTextures& st = app.slotTex[slot];
+      if (!mt.used || mt.hidden || !st.matcap || !st.mask) continue;
+      glBlendFunc(GL_SRC_ALPHA, mt.additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+      bindUnit(2, st.matcap);
+      bindUnit(3, st.mask);
+      glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, idx.data());
+    }
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    for (int unit = 3; unit >= 0; --unit) bindUnit(unit, 0);
+    gl.UseProgram(0);
+    gl.DisableVertexAttribArray(1);
+    glDisableClientState(GL_NORMAL_ARRAY);
+  } else {
+    glEnable(GL_TEXTURE_2D);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glDisable(GL_BLEND);
+    glBindTexture(GL_TEXTURE_2D, colorMap);
+    glTexCoordPointer(2, GL_FLOAT, 0, uv.data());
+    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, idx.data());
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+    glBindTexture(GL_TEXTURE_2D, app.slotTex[0].matcap);
+    glTexCoordPointer(2, GL_FLOAT, 0, mc.data());
+    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, idx.data());
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glDisable(GL_TEXTURE_2D);
+  }
 
   drawWireframe(idx);
   glDisableClientState(GL_VERTEX_ARRAY);
@@ -505,10 +633,17 @@ void render(bool present = true) {
   if (app.paintMode) {
     auto rgb = [](uint32_t c) { return (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF); };
     const std::array<float, 3>& ps = paintSliders();
+    const Material& mt = app.canvas->material(app.editSlot);
+    std::string matcap = mt.matcap.substr(mt.matcap.find_last_of(":/\\") + 1);
+    char slot[160];
+    if (app.editSlot == 0) std::snprintf(slot, sizeof slot, "paints color, base %s", matcap.c_str());
+    else
+      std::snprintf(slot, sizeof slot, "paints mask %d (%s%s%s%s)", app.editSlot, matcap.c_str(),
+                    mt.colored ? ", colored" : "", mt.additive ? ", additive" : "", mt.hidden ? ", hidden" : "");
     std::snprintf(title, sizeof title,
-                  "bildhauer - %s  size %.1f  strength %.1f  hardness %.1f  colors #%06X #%06X %s|  %d tris  %s",
+                  "bildhauer - %s  size %.1f  strength %.1f  hardness %.1f  colors #%06X #%06X  %s %s|  %d tris  %s",
                   paintToolName(app.paint.tool), ps[0], ps[1], ps[2], rgb(app.paint.primary),
-                  rgb(app.paint.secondary), app.showBumpNormals ? "[bump normals] " : "", app.mesh.numTriangles(),
+                  rgb(app.paint.secondary), slot, app.showBumpNormals ? "[bump normals] " : "", app.mesh.numTriangles(),
                   app.status.c_str());
   } else {
     std::snprintf(title, sizeof title, "bildhauer - %s  size %.1f  strength %.1f  %s%s|  %d tris  %s",
@@ -570,6 +705,7 @@ void beginPaintStroke(int mx, int my, bool invert) {
   s.radius = worldRadius(in.point);
   s.strength = brushStrength(ps[1]) * (invert ? -1.0f : 1.0f);
   s.hardness = ps[2];
+  s.target = app.editSlot;
   app.paintStroke = std::make_unique<PaintStroke>(*app.canvas, s, in.point);
 }
 
@@ -583,6 +719,57 @@ void pickColor(uint32_t& color) {
   cc.lpCustColors = custom;
   cc.Flags = CC_RGBINIT | CC_FULLOPEN;
   if (ChooseColorA(&cc)) color = cc.rgbResult & 0xFFFFFF;
+}
+
+// Matcap image for a material slot (file dialog).
+void pickMatcapFile(Material& mt) {
+  char file[MAX_PATH] = {};
+  OPENFILENAMEA ofn{};
+  ofn.lStructSize = sizeof ofn;
+  ofn.hwndOwner = app.hwnd;
+  ofn.lpstrFilter = "Images\0*.png;*.jpg;*.jpeg;*.bmp;*.tif\0All files\0*.*\0";
+  ofn.lpstrFile = file;
+  ofn.nMaxFile = sizeof file;
+  ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+  if (GetOpenFileNameA(&ofn)) mt.matcap = file;
+}
+
+// The next built-in matcap after the slot's current one.
+std::string nextBuiltinMatcap(const std::string& current) {
+  const std::vector<std::string>& names = builtinMatcaps();
+  auto it = std::find(names.begin(), names.end(), current);
+  return it == names.end() || it + 1 == names.end() ? names[0] : *(it + 1);
+}
+
+void onMaterialKey(WPARAM key) {
+  Canvas& cv = *app.canvas;
+  Material& mt = cv.material(app.editSlot);
+  if (key >= '0' && key <= '9') {
+    const int slot = int(key - '0');
+    if (cv.material(slot).used) app.editSlot = slot;
+    else app.status = "no layer " + std::to_string(slot) + " (L adds one)";
+    return;
+  }
+  switch (key) {
+    case 'L': {
+      int last = 0;
+      for (int s = 0; s < kMaxMaterials; ++s)
+        if (cv.material(s).used) last = s;
+      const int slot = cv.addLayer(nextBuiltinMatcap(cv.material(last).matcap));
+      if (slot < 0) {
+        app.status = "all 16 material slots are in use";
+        return;
+      }
+      cv.material(slot).colored = true;
+      app.editSlot = slot;
+      break;
+    }
+    case 'M': mt.matcap = nextBuiltinMatcap(mt.matcap); break;
+    case 'O': pickMatcapFile(mt); break;
+    case 'C': mt.colored = !mt.colored; break;
+    case 'A': if (app.editSlot > 0) mt.additive = !mt.additive; break;
+    case 'H': if (app.editSlot > 0) mt.hidden = !mt.hidden; break;
+  }
 }
 
 void onPaintKey(WPARAM key, bool ctrl, bool shift) {
@@ -608,6 +795,7 @@ void onPaintKey(WPARAM key, bool ctrl, bool shift) {
     case 'K': pickColor(shift ? app.paint.secondary : app.paint.primary); break;
     case 'N': app.showBumpNormals = !app.showBumpNormals; break;
     case 'W': app.wireframe = !app.wireframe; break;
+    default: onMaterialKey(key);
   }
 }
 
@@ -839,14 +1027,20 @@ void runPaintDemo() {
   strokeAcross(PaintTool::Color, false, app.height / 2 - 110);
   strokeAcross(PaintTool::Color, true, app.height / 2 - 30);
   strokeAcross(PaintTool::Bump, false, app.height / 2 + 50);
+  // A gold layer, painted in across the forehead.
+  app.editSlot = app.canvas->addLayer("bildhauer:gold");
+  app.canvas->material(app.editSlot).colored = true;
+  strokeAcross(PaintTool::Color, false, app.height / 2 - 170);
   app.paint.tool = PaintTool::Color;
+  app.editSlot = 0;
 }
 
 }  // namespace
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // Windows Imaging Component (matcap images)
   std::string modelPath, snapshot;
-  bool demo = false, paint = false;
+  bool demo = false, paint = false, save = false;
   int frames = 0;
   for (int i = 1; i < __argc; ++i) {
     std::string a = __argv[i];
@@ -855,6 +1049,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     else if (a == "--demo") demo = true;
     else if (a == "--paint") paint = true;
     else if (a == "--bump-normals") app.showBumpNormals = true;
+    else if (a == "--save") save = true;
     else modelPath = a;
   }
   for (int t = 0; t < int(app.sliders.size()); ++t) app.sliders[size_t(t)] = defaultSliders(Tool(t));
@@ -868,8 +1063,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     MessageBoxA(nullptr, "Could not create an OpenGL window.", "bildhauer", MB_ICONERROR);
     return 1;
   }
-  app.matcap = makeMatcap(false);
-  app.matcapGray = makeMatcap(true);
+  app.matcap = matcapTexture(builtinMatcaps()[0], false, nullptr);
+  initPaintShader();
   frameModel();
   if (!snapshot.empty()) {
     RECT rc;
@@ -878,6 +1073,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     app.height = rc.bottom;
     if (paint) enterPaintMode();
     if (demo) app.paintMode ? runPaintDemo() : runDemo();
+    if (save) saveModel();
     if (frames > 0) {  // average frame time, written next to the snapshot
       LARGE_INTEGER f, t0, t1;
       QueryPerformanceFrequency(&f);

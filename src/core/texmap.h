@@ -23,12 +23,21 @@ struct TexVert {
   int vertex = -1;
 };
 
+// Projection frame of a chart, saved in .sc1 as a Sculptris patch: where
+// the chart starts in UV, its 3D center, and its axes (in-plane x and y as
+// laid out in the texture, then the normal).
+struct ChartFrame {
+  Vec3 uvOrigin, center;
+  std::array<Vec3, 3> axes;
+};
+
 struct TextureMapping {
   int size = 0;  // texture width and height in texels
   std::vector<TexVert> texverts;
   std::vector<std::array<int, 3>> corners;  // per triangle slot: texvert per corner, -1 = none
   std::vector<int> chart;                   // per triangle slot: chart id, -1 = none
   int numCharts = 0;
+  std::vector<ChartFrame> frames;           // per chart
 
   bool empty() const { return texverts.empty(); }
 };
@@ -51,6 +60,16 @@ struct AtlasStats {
   float coverage = 0;    // UV area of all triangles / texture area
   float maxStretch = 0;  // texel density sqrt(UV area / mesh area): largest deviation from the median, as a factor
 };
+
+// Tangent frame per texvert for bump shading: t is the unit direction of
+// +u, made orthogonal to the vertex normal; the direction of +v is
+// w * cross(normal, t), w = +-1 (UV winding).
+struct Tangent {
+  Vec3 t;
+  float w = 1;
+};
+
+std::vector<Tangent> computeTangents(const Mesh& mesh, const TextureMapping& map);
 
 // Consistency check and quality figures of a mapping.
 AtlasStats atlasStats(const Mesh& mesh, const TextureMapping& map);
