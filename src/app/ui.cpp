@@ -57,6 +57,15 @@ bool colorEdit(const char* label, uint32_t& color) {
 
 void slider(const char* label, float& value) { ImGui::SliderFloat(label, &value, 0.0f, 1.0f, "%.2f"); }
 
+// A selectable that shows its selection in amber (the mode, the material layer).
+bool accentSelectable(const char* label, bool selected, const ImVec2& size = ImVec2(0, 0)) {
+  ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.55f, 0.4f, 0.17f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.62f, 0.45f, 0.2f, 1.0f));
+  const bool clicked = ImGui::Selectable(label, selected, ImGuiSelectableFlags_None, size);
+  ImGui::PopStyleColor(2);
+  return clicked;
+}
+
 // Fixed layout: menu bar on top, status bar at the bottom, the tool strip and
 // the brush panel on the left, the model panel on the right; the 3D view
 // gets the rest.
@@ -89,7 +98,7 @@ ImU32 paintColor() { return app.paint.primary | 0xFF000000u; }
 
 // The tool icon, a larger title beside it, and a short description below.
 void panelTitle(Icon icon, const char* title, const char* description) {
-  ImGui::PushFont(nullptr, ImGui::GetFontSize() / ImGui::GetStyle().FontScaleDpi * 1.35f);
+  ImGui::PushFont(nullptr, ImGui::GetFontSize() / ImGui::GetStyle().FontScaleDpi * 1.6f);
   const float side = ImGui::GetFontSize() * 1.5f;
   const ImVec2 p = ImGui::GetCursorScreenPos();
   drawIcon(ImGui::GetWindowDrawList(), icon, ImVec2(p.x + side / 2, p.y + side / 2), side,
@@ -170,11 +179,11 @@ void menuBar() {
   const float sculptW = ImGui::CalcTextSize("Sculpt").x + 2 * pad, paintW = ImGui::CalcTextSize("Paint").x + 2 * pad;
   ImGui::SetCursorPosX((ImGui::GetWindowWidth() - sculptW - paintW) / 2);
   ImGui::BeginDisabled(app.paintMode);
-  ImGui::Selectable("Sculpt", !app.paintMode, ImGuiSelectableFlags_None, ImVec2(sculptW - 2 * pad, 0));
+  accentSelectable("Sculpt", !app.paintMode, ImVec2(sculptW - 2 * pad, 0));
   ImGui::EndDisabled();
   if (app.paintMode && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort))
     ImGui::SetTooltip("Paint mode is one way: the mesh stays as it is");
-  if (ImGui::Selectable("Paint", app.paintMode, ImGuiSelectableFlags_None, ImVec2(paintW - 2 * pad, 0)) &&
+  if (accentSelectable("Paint", app.paintMode, ImVec2(paintW - 2 * pad, 0)) &&
       !app.paintMode)
     askEnterPaintMode();
   if (!app.paintMode && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
@@ -426,7 +435,7 @@ void materialPanel() {
     char label[128];
     std::snprintf(label, sizeof label, "%s  %s%s", slot == 0 ? "Base" : ("Layer " + std::to_string(slot)).c_str(),
                   matcapLabel(m.matcap).c_str(), m.hidden ? "  (hidden)" : "");
-    if (ImGui::Selectable(label, app.editSlot == slot, 0, ImVec2(0, thumb))) app.editSlot = slot;
+    if (accentSelectable(label, app.editSlot == slot, ImVec2(0, thumb))) app.editSlot = slot;
     ImGui::PopID();
   }
   if (ImGui::Button("Add layer (L)", ImVec2(-1, 0))) addMaterialLayer();
@@ -611,6 +620,7 @@ void axisGizmo() {
   ImGui::SetNextWindowPos(ImVec2(vp->Pos.x + app.viewX + app.viewW - size - pad, vp->Pos.y + app.viewY + pad));
   ImGui::SetNextWindowSize(ImVec2(size, size));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
   if (ImGui::Begin("##axes", nullptr, kOverlayFlags | ImGuiWindowFlags_NoBackground)) {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton("##axes", ImVec2(size, size));
@@ -674,7 +684,7 @@ void axisGizmo() {
     }
   }
   ImGui::End();
-  ImGui::PopStyleVar();
+  ImGui::PopStyleVar(2);
 }
 
 // An icon button for the view bar.
@@ -788,32 +798,48 @@ void setStyle(float scale) {
   ImGui::StyleColorsDark();
   ImGuiStyle& s = ImGui::GetStyle();
   s.WindowRounding = 0;
-  s.FrameRounding = 4;
-  s.GrabRounding = 4;
-  s.PopupRounding = 4;
-  s.WindowBorderSize = 0;
+  s.ChildRounding = s.FrameRounding = s.GrabRounding = s.PopupRounding = 5;
+  s.ScrollbarRounding = 5;
+  s.WindowBorderSize = 1;
+  s.PopupBorderSize = 1;
+  s.WindowPadding = ImVec2(12, 10);
   s.FramePadding = ImVec2(8, 4);
-  s.ItemSpacing = ImVec2(8, 6);
+  s.ItemSpacing = ImVec2(8, 7);
+  s.ItemInnerSpacing = ImVec2(6, 4);
+  s.IndentSpacing = 16;
+  s.ScrollbarSize = 10;
+  s.GrabMinSize = 10;
+  s.SeparatorTextBorderSize = 1;
+  s.SeparatorTextPadding = ImVec2(0, 4);
   ImVec4* c = s.Colors;
-  const ImVec4 accent(0.86f, 0.62f, 0.25f, 1.0f);
-  c[ImGuiCol_WindowBg] = ImVec4(0.11f, 0.115f, 0.13f, 0.94f);
-  c[ImGuiCol_MenuBarBg] = ImVec4(0.09f, 0.095f, 0.11f, 1.0f);
-  c[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.125f, 0.14f, 0.98f);
-  c[ImGuiCol_FrameBg] = ImVec4(0.19f, 0.2f, 0.23f, 1.0f);
-  c[ImGuiCol_FrameBgHovered] = ImVec4(0.25f, 0.26f, 0.3f, 1.0f);
-  c[ImGuiCol_FrameBgActive] = ImVec4(0.3f, 0.31f, 0.35f, 1.0f);
-  c[ImGuiCol_Button] = ImVec4(0.2f, 0.21f, 0.24f, 1.0f);
-  c[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.29f, 0.33f, 1.0f);
-  c[ImGuiCol_ButtonActive] = ImVec4(0.55f, 0.4f, 0.17f, 1.0f);
-  c[ImGuiCol_Header] = ImVec4(0.55f, 0.4f, 0.17f, 0.55f);
-  c[ImGuiCol_HeaderHovered] = ImVec4(0.55f, 0.4f, 0.17f, 0.75f);
-  c[ImGuiCol_HeaderActive] = ImVec4(0.55f, 0.4f, 0.17f, 1.0f);
+  // Neutral slate grays; amber marks what is selected or active (the tool,
+  // the mode, the material layer) and the values of sliders and checkboxes.
+  const ImVec4 accent(0.86f, 0.62f, 0.25f, 1.0f), accentDim(0.55f, 0.4f, 0.17f, 1.0f);
+  c[ImGuiCol_Text] = ImVec4(0.9f, 0.9f, 0.88f, 1.0f);
+  c[ImGuiCol_TextDisabled] = ImVec4(0.55f, 0.56f, 0.6f, 1.0f);
+  c[ImGuiCol_WindowBg] = ImVec4(0.115f, 0.12f, 0.135f, 1.0f);
+  c[ImGuiCol_MenuBarBg] = ImVec4(0.085f, 0.09f, 0.1f, 1.0f);
+  c[ImGuiCol_PopupBg] = ImVec4(0.13f, 0.135f, 0.155f, 0.98f);
+  c[ImGuiCol_Border] = ImVec4(0.06f, 0.065f, 0.075f, 1.0f);
+  c[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.19f, 0.215f, 1.0f);
+  c[ImGuiCol_FrameBgHovered] = ImVec4(0.23f, 0.24f, 0.275f, 1.0f);
+  c[ImGuiCol_FrameBgActive] = ImVec4(0.27f, 0.28f, 0.32f, 1.0f);
+  c[ImGuiCol_Button] = ImVec4(0.19f, 0.2f, 0.23f, 1.0f);
+  c[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.27f, 0.31f, 1.0f);
+  c[ImGuiCol_ButtonActive] = accentDim;
+  c[ImGuiCol_Header] = ImVec4(0.17f, 0.18f, 0.205f, 1.0f);
+  c[ImGuiCol_HeaderHovered] = ImVec4(0.23f, 0.24f, 0.275f, 1.0f);
+  c[ImGuiCol_HeaderActive] = ImVec4(0.27f, 0.28f, 0.32f, 1.0f);
   c[ImGuiCol_SliderGrab] = accent;
   c[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.75f, 0.35f, 1.0f);
   c[ImGuiCol_CheckMark] = accent;
-  c[ImGuiCol_TitleBg] = c[ImGuiCol_TitleBgActive] = ImVec4(0.09f, 0.095f, 0.11f, 1.0f);
-  c[ImGuiCol_Separator] = ImVec4(0.3f, 0.31f, 0.35f, 1.0f);
-  c[ImGuiCol_Text] = ImVec4(0.9f, 0.9f, 0.88f, 1.0f);
+  c[ImGuiCol_TitleBg] = c[ImGuiCol_TitleBgActive] = c[ImGuiCol_MenuBarBg];
+  c[ImGuiCol_Separator] = ImVec4(0.24f, 0.25f, 0.28f, 1.0f);
+  c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+  c[ImGuiCol_ScrollbarGrab] = ImVec4(0.24f, 0.25f, 0.28f, 1.0f);
+  c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.3f, 0.31f, 0.35f, 1.0f);
+  c[ImGuiCol_ScrollbarGrabActive] = accentDim;
+  c[ImGuiCol_ResizeGrip] = ImVec4(0, 0, 0, 0);
   s.ScaleAllSizes(scale);
   s.FontScaleDpi = scale;
 }
