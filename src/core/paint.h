@@ -18,10 +18,9 @@
 // both halves) a texel is painted from the nearer of its two images; bump
 // normals ignore neighbors outside the charts. Material slots (paint.md
 // 4.2) keep a mask per layer, painted like the color layer. Stamps (brush
-// mask and texture, 3.6) follow Sculptris, except that with a stamp a
-// negative strength still lowers the bump and m uses |k| (Sculptris clamps a
-// negative k to the minimum). Not yet implemented: heightmask, paint mask,
-// Combine color and bump, Airbrush.
+// mask and texture, 3.6) and the heightmask (3.3) follow Sculptris, the
+// latter including its use of the previous dab's mean normal, kept across
+// strokes. Not yet implemented: paint mask, Combine color and bump, Airbrush.
 
 #include <array>
 #include <cstdint>
@@ -113,6 +112,13 @@ struct PaintSettings {
   uint32_t secondary = 0xDD6622;  // RGB 34, 102, 221
   float spacingFactor = 0.25f;
   bool angleFalloff = true;  // "Surface angle falloff"
+  // Heightmask (paint.md 3.3), Paint color only: the amount follows how far
+  // a texel lies above the dab's average (below with cavity), measured on
+  // the bump layer and/or the geometry along the mean normal.
+  bool heightmask = false;
+  bool heightFromBump = false, heightFromGeometry = true;
+  bool cavity = false;
+  float heightmaskDepth = 0.65f;  // slider, [0, 1]; larger is more selective
   // 0: the color layer. n > 0: Paint color edits the mask of material slot n
   // instead ("Edit material mask"), the primary color showing the layer,
   // the secondary (Ctrl) hiding it.
@@ -228,6 +234,7 @@ class Canvas {
   std::vector<int> found_, hits_;
   std::vector<float> hitX_;
   std::vector<Vec3> hitN_, hitE_;  // visible normal, offset from the dab center
+  Vec3 meanNormal_;                // of the last dab; zero before the first
 };
 
 // Places the dabs of a stroke and gives each its stamp frame: fixed,

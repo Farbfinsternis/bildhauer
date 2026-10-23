@@ -170,6 +170,28 @@ GLuint stampPreview(float& aspect) {
   return tex;
 }
 
+// Heightmask (paint.md 3.3): Paint color only reaches the high (or, with
+// Cavity, the low) parts within the dab.
+void heightmaskPanel() {
+  PaintSettings& p = app.paint;
+  ImGui::Checkbox("Heightmask", &p.heightmask);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Paint color only reaches what lies above the brush area's average height.\n"
+                      "Bump strokes ignore it.");
+  if (!p.heightmask) return;
+  ImGui::Indent();
+  ImGui::Checkbox("Cavity", &p.cavity);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Paint the low parts instead");
+  ImGui::TextUnformatted("Height from:");
+  ImGui::Checkbox("Bumpmap", &p.heightFromBump);
+  ImGui::SameLine();
+  ImGui::Checkbox("Geometry", &p.heightFromGeometry);
+  slider("Depth", p.heightmaskDepth);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Higher: fewer texels pass, and they get less paint");
+  ImGui::Unindent();
+}
+
 // Brush mask and brush texture (paint.md 3.6) and how the stamp turns.
 void stampPanel() {
   ImGui::SeparatorText("Stamp");
@@ -288,6 +310,7 @@ void paintPanel(float width) {
   slider("Strength", ps[1]);
   slider("Hardness", ps[2]);
   ImGui::Checkbox("Surface angle falloff", &app.paint.angleFalloff);
+  heightmaskPanel();
   ImGui::TextDisabled("Ctrl inverts");
   char fill[64];
   std::snprintf(fill, sizeof fill, "%s (Ctrl+F)", fillLabel());

@@ -4,6 +4,7 @@
 //   bildhauer [file.sc1] --snapshot out.png [--demo] [--paint] [--save]
 //                             [--symmetry-off] [--bump-normals] [--no-ui] [--frames N]
 //                             [--brush-mask image] [--brush-texture image]
+//                             [--heightmask] [--cavity]
 //                             render one frame and exit (snapshot.h);
 //                             --frames also writes the mean frame time to out.png.txt
 //
@@ -137,6 +138,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     else if (a == "--save") snapshot.save = true;
     else if (a == "--no-ui") snapshot.ui = false;
     else if (a == "--bump-normals") app.showBumpNormals = true;
+    else if (a == "--heightmask") app.paint.heightmask = true;
+    else if (a == "--cavity") app.paint.heightmask = app.paint.cavity = true;
     else if (a == "--brush-mask" && i + 1 < __argc) snapshot.brushMask = __argv[++i];
     else if (a == "--brush-texture" && i + 1 < __argc) snapshot.brushTexture = __argv[++i];
     else modelPath = a;

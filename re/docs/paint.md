@@ -109,7 +109,7 @@ Options (flag → meaning):
 | 0x4FD13F / 0x4FD140 | Brush mask: Enable / Invert | grayscale stamp scales the amount |
 | 0x4FD141 | Brush texture: Enable | the stamp's colors replace the paint color |
 | 0x4FD229 / 0x4FD22A | Directional / Random | stamp rotation along the stroke / random |
-| 0x4FD143 | Heightmask | amount depends on height relative to the dab area |
+| 0x4FD143 | Heightmask | amount depends on height relative to the dab area (color strokes only, 3.3) |
 | 0x4FD144 / 0x4B08BA | Height from: Bumpmap / Geometry (default on) | sources for the heightmask |
 | 0x4FD145 | Cavity | inverts the heightmask (paints the low parts) |
 | 0x4B08DC | Heightmask depth (default 0.65) | range of the heightmask |
@@ -157,11 +157,24 @@ are the view direction `w` of the stroke (stroke +0x68), the screen axes
   `A = w × B`, `N = B × A` (0x415670, shared with the sculpt brush mask).
 - A dab mapped from the mirrored half flips the frame's x components.
 
-Before the per-texel pass, the dab averages over the texels in range,
-weighted by `1 − x`: the texel normals, the bump heights (Heightmask from
-Bumpmap) and the depths along the previous dab's mean normal (Heightmask
-from Geometry). The 64 × 64 texel tiles that the dab touches are marked
-dirty and backed up for undo (0x4248E0).
+Before the per-texel pass, the dab (0x426120) walks the texels in range
+with `x ≤ 1` and `w = 1 − x`:
+
+```
+n̄  = normalize(Σ w · texelNormal)              // mean normal, kept at 0x4FD3B8
+if heightmask:
+    h̄ = Σ w · h / Σ w                          // only with "Height from Bumpmap";
+                                               // h read as unsigned 32 bit
+    ē = Σ (n̄_prev · e) / count                 // only with "Height from Geometry";
+                                               // plain mean, no weights
+```
+
+`n̄_prev` is the mean normal of the **previous** dab (whatever 0x4FD3B8 held
+before; zero before the first dab ever), so `ē` and the per-texel depth
+`n̄ · e` (3.3) use slightly different axes. With nothing in range `h̄` and
+`ē` stay 0 and the normalize (0x402690) turns the zero sum into (1, 0, 0).
+The 64 × 64 texel tiles that the dab touches are marked dirty and backed
+up for undo (0x4248E0).
 
 - **Color (tool 0):** target color = primary, or secondary if `k ≤ 0`
   (Ctrl inverts the strength). With "Combine color and bump" the same dab
@@ -187,18 +200,42 @@ if brush mask or brush texture enabled (a stamp is used):
     outside [0, 1]² → skip                      // the stamp covers ±1.5 r
     q = (0.15 − |e · N| / (3r)) / 0.05          // depth along the stamp normal
     q ≤ 0 → skip                                 // full up to 0.3 r, gone at 0.45 r
-    m = clamp(q · k, 1/128, 1)
+    m = clamp(q · k, −1, 1)
 if surface angle falloff (or a stamp):
     a = (dot(texelNormal, N) − 0.15) · 3        // N: the stamp normal, toward the viewer
     a < 0 → skip;  a < 1 → f *= a
-if heightmask:
-    from the bump height and/or the geometric depth relative to the dab
-    averages, ramped by the heightmask depth (2.5 − depth^1.5 · 2.48);
-    Cavity inverts it; f *= clamp(…, 0, 1)  [exact ramps likely]
+if heightmask and mode 0:                        // color only, see below
+    D = 2.5 − depth^1.5 · 2.48                  // depth = slider 0x4B08DC
+    t = 1
+    if from Bumpmap:
+        b = (h − h̄) / 98304                     // 98304 = 3 · 32768
+        t = clamp(cavity ? −b − 0.02 : b − 0.03, 0, 1)
+    if from Geometry:
+        g = (n̄ · e − ē) / (3r) · 4
+        g = cavity ? −g + 0.05 − (1 − D) · 0.07
+                   :  g + 0.25 − (2.5 − D) · 0.12
+        t *= clamp(g, 0, 1)
+    f *= clamp(t · D, 0, 1)
 ```
 
 The angle falloff thus favors surfaces that face the viewer; texels turned
 more than about 81° away (dot < 0.15) are not painted.
+
+**Heightmask.** The checkbox (0x4FD143) only acts on color strokes: the
+branch tests the mode (0x425C10) and bump strokes (modes 1 and 2, also the
+bump half of "Combine color and bump") skip it. Texels above the dab's
+average (bump height `h̄`, depth `ē` along the mean normal) get paint,
+those below get none; Cavity mirrors this onto the low parts, with
+slightly different offsets (0.02 instead of 0.03, 0.05 instead of 0.25).
+Both sources multiply; with neither source checked `t = 1` and only the
+cap `min(D, 1)` is left. The depth slider (range [0, 1]) sets `D` from 2.5
+(depth 0) to 0.02 (depth 1), default 0.65 gives `D ≈ 1.20`. A larger depth
+thus lowers the gain `D` and, for Geometry, also the offset, so fewer
+texels pass and they get less paint. Examples for the default: Geometry
+alone starts at `n̄ · e − ē ≈ −0.07 r` and reaches full paint at about
+`+0.55 r`; Bumpmap alone starts 0.03 · 98304 ≈ 2950 above `h̄` (about an
+eighth of a full-strength bump dab) and is full at about 0.86 · 98304
+above it. The `f *= 0` case still writes, but with no effect.
 
 Writing, without a stamp:
 
@@ -215,11 +252,12 @@ With a stamp, the stamp sample `S = (RGB, α)` at (u, v) (0x41C940:
 bilinear, u and v clamped to [0, 1], pixel coordinates `u · (w − 1)`,
 `v · (h − 1)`) takes the place of `k`:
 
-- **Mode 0:** `A = α`, the step uses `f · m` instead of `f`; the target is
-  the stamp's RGB with Brush texture on, else the paint color as above.
-- **Modes 1 and 2:** `f · k` becomes `(α / 255) · m · f`. Since `m` is
-  clamped to at least 1/128, a negative k paints at that minimum instead of
-  lowering **[as read]**.
+- **Mode 0:** `A = α`, the step uses `|f · m|` instead of `f`; the target
+  is the stamp's RGB with Brush texture on, else the paint color as above.
+- **Modes 1 and 2:** `f · k` becomes `(α / 255) · m · f`. Since `m` keeps
+  the sign of k, a negative k lowers (mode 1) as without a stamp. (Earlier
+  versions of this document read the lower clamp as 1/128: the constant at
+  0x4AD610 is loaded as a float, −1.0, not as a double.)
 
 ### 3.4 Bump to normals (`UpdateBumpNormals`, 0x424170) **[sure]**
 
@@ -351,7 +389,6 @@ place of the missing matcap **[open]**.
 
 ## 5. Open points
 
-- Exact heightmask ramps (3.3).
 - UI label of material flag +0x24A.
 - The UV atlas itself (section 2) is not reconstructed on purpose:
   bildhauer uses its own unwrapping and keeps the UVs stored in .sc1.

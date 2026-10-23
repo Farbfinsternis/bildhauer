@@ -345,6 +345,24 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
     hitN_.push_back(n);
     hitE_.push_back(p - center);
   }
+  // Dab averages (paint.md 3.2): the mean normal, and for the heightmask the
+  // mean height and the mean depth along the previous dab's normal.
+  const bool heightmask = s.heightmask && s.tool == PaintTool::Color;
+  Vec3 sumN;
+  double sumW = 0, sumH = 0, sumDepth = 0;
+  for (size_t h = 0; h < hits_.size(); ++h) {
+    const float w = 1 - hitX_[h];
+    sumN += hitN_[h] * w;
+    if (!heightmask) continue;
+    sumW += w;
+    sumH += w * double(heights_[hits_[h]]);
+    sumDepth += dot(meanNormal_, hitE_[h]);
+  }
+  meanNormal_ = length(sumN) > 1e-12f ? normalize(sumN) : Vec3{1, 0, 0};
+  const double meanH = sumW > 0 ? sumH / sumW : 0;
+  const float meanDepth = hits_.empty() ? 0 : float(sumDepth / hits_.size());
+  const float depthGain = 2.5f - std::pow(std::clamp(s.heightmaskDepth, 0.0f, 1.0f), 1.5f) * 2.48f;
+
   // The stamp normal faces the viewer; the angle falloff measures against it.
   const Vec3 toViewer = normalize(s.toViewer);
   const bool angle = (s.angleFalloff || stamp) && length(toViewer) > 0;
@@ -375,7 +393,7 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
       if (u < 0 || u > 1 || v < 0 || v > 1) continue;
       const float q = (0.15f - std::fabs(dot(e, fr.n)) * stampScale) / 0.05f;
       if (q <= 0) continue;
-      m = std::clamp(q * std::fabs(k), 1.0f / 128, 1.0f);
+      m = std::clamp(q * k, -1.0f, 1.0f);
       sample = stamp->sample(u, v);
     }
     if (angle) {
@@ -383,13 +401,26 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
       if (a < 0) continue;
       if (a < 1) f *= a;
     }
-    if (f <= 0) continue;
     const int i = hits_[h];
+    if (heightmask) {
+      float t = 1;
+      if (s.heightFromBump) {
+        const float b = float((heights_[i] - meanH) / 98304);
+        t = std::clamp(s.cavity ? -b - 0.02f : b - 0.03f, 0.0f, 1.0f);
+      }
+      if (s.heightFromGeometry) {
+        float g = (dot(meanNormal_, hitE_[h]) - meanDepth) * stampScale * 4;
+        g = s.cavity ? -g + 0.05f - (1 - depthGain) * 0.07f : g + 0.25f - (2.5f - depthGain) * 0.12f;
+        t *= std::clamp(g, 0.0f, 1.0f);
+      }
+      f *= std::clamp(t * depthGain, 0.0f, 1.0f);
+    }
+    if (f <= 0) continue;
     touchTile(tileOf(i), slot);
     const int64_t stampAlpha = sample >> 24;
     switch (s.tool) {
       case PaintTool::Color: {
-        const int64_t amount = stamp ? (stampAlpha * 257 * std::lround(f * m * 32768)) >> 15
+        const int64_t amount = stamp ? (stampAlpha * 257 * std::lround(f * std::fabs(m) * 32768)) >> 15
                                      : (alpha16 * std::lround(f * 32768)) >> 15;
         if (slot > 0) {
           const int64_t goal = k > 0 ? 65535 : 0;
@@ -407,8 +438,8 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
       }
       case PaintTool::Bump:
       case PaintTool::FlattenBump: {
-        // With a stamp the sign of k is kept, so Ctrl still lowers.
-        const float amount = stamp ? std::copysign(stampAlpha / 255.0f * m * f, k) : f * k;
+        // With a stamp m carries the sign of k, so Ctrl still lowers.
+        const float amount = stamp ? stampAlpha / 255.0f * m * f : f * k;
         const int64_t v = s.tool == PaintTool::Bump
                               ? heights_[i] + int64_t(std::lround(amount * 24576)) * 255 / 256
                               : heights_[i] + ((std::lround(amount * 255) * (int64_t(kNeutralHeight) - heights_[i])) >> 8);

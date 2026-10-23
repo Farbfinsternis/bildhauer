@@ -1,6 +1,6 @@
 // Paint mode: texel baking and the range query on every sample, then color,
 // bump and flatten dabs, normals, undo and symmetry against the formulas of
-// re/docs/paint.md 3; stamps (brush mask and texture); Fill/Clear; material masks; tangents; saving paint data (a stored
+// re/docs/paint.md 3; stamps (brush mask and texture); the heightmask; Fill/Clear; material masks; tangents; saving paint data (a stored
 // texturing block re-encodes byte-identically, painted canvases survive a
 // save and load); stored images of painted files load unchanged.
 //
@@ -356,6 +356,11 @@ void testStampDabs(const Mesh& m, const TextureMapping& map) {
   check(int64_t(h.heights()[c]) - kNeutralHeight == expect,
         "stamp dab: bump scales with the stamp's gray (" + std::to_string(int64_t(h.heights()[c]) - kNeutralHeight) +
             ", expected " + std::to_string(expect) + ")");
+  // Inverted, m = clamp(q k, -1, 1) keeps the sign: the same step down.
+  bump.strength = -bump.strength;
+  Canvas lowered(m, map, kSize, kSize);
+  lowered.dab(p, bump);
+  check(int64_t(lowered.heights()[c]) - kNeutralHeight == -expect, "stamp dab: inverted bump lowers by the same step");
 
   // Depth: the stamp reaches 0.45 r along its normal (fully up to 0.3 r).
   s.stamps = &white;
@@ -372,6 +377,87 @@ void testStampDabs(const Mesh& m, const TextureMapping& map) {
   }
   check(painted > 10 && tooDeep == 0, "stamp dab: only texels within 0.45 r along the stamp normal (" +
                                           std::to_string(painted) + " painted)");
+}
+
+void testHeightmask(const Mesh& m, const TextureMapping& map) {
+  Vec3 center;
+  const float diag = length(bboxDiagonal(m, &center));
+  PaintSettings s;
+  s.radius = diag * 0.04f;
+  s.strength = 1.97f;  // k = 1
+  s.hardness = 1.0f;
+  Canvas probe(m, map, kSize, kSize);
+  const Texels& tx = probe.texels();
+  const int c = centerTexel(m, tx, s.radius * 1.3f);
+  if (c < 0) return;
+  const Vec3 p = tx.pos[c];
+  s.toViewer = tx.normal[c];
+  s.heightmask = true;
+  const std::vector<uint32_t> before = probe.colorImage();
+  // How far the center texel moved toward the primary color, 0 ... 1.
+  auto moved = [&](const Canvas& cv) {
+    const int k = channel(before[c], 0) != channel(s.primary, 0) ? 0 : 2;
+    return float(channel(cv.colorImage()[c], k) - channel(before[c], k)) /
+           float(channel(s.primary, k) - channel(before[c], k));
+  };
+
+  // No source: only the cap min(D, 1) with D = 2.5 - depth^1.5 * 2.48.
+  s.heightFromGeometry = false;
+  s.heightmaskDepth = 0;  // D = 2.5
+  Canvas full(m, map, kSize, kSize);
+  full.dab(p, s);
+  check(sameColor(full.colorImage()[c], s.primary, 1), "heightmask: depth 0 without a source paints fully");
+  s.heightmaskDepth = 1;  // D = 0.02
+  Canvas faint(m, map, kSize, kSize);
+  faint.dab(p, s);
+  check(moved(faint) > 0 && moved(faint) < 0.04f, "heightmask: depth 1 paints 2 % of the way");
+
+  // Geometry on a fresh canvas: no previous normal, so the mean depth is 0
+  // and the center (e = 0) gets clamp(0.25 - (2.5 - D) 0.12) * D.
+  s.heightFromGeometry = true;
+  s.heightmaskDepth = 0.65f;
+  const float gain = 2.5f - std::pow(0.65f, 1.5f) * 2.48f;
+  const float expect = (0.25f - (2.5f - gain) * 0.12f) * gain;
+  Canvas geo(m, map, kSize, kSize);
+  geo.dab(p, s);
+  check(std::fabs(moved(geo) - expect) < 0.03f, "heightmask: geometry at the center paints " +
+                                                     std::to_string(moved(geo)) + ", expected " +
+                                                     std::to_string(expect));
+
+  // Bump: a hump at the center. Above the average it is painted, with
+  // cavity only the low rim is.
+  PaintSettings bump = s;
+  bump.tool = PaintTool::Bump;
+  bump.heightmask = false;
+  bump.hardness = 0.5f;
+  s.heightFromGeometry = false;
+  s.heightFromBump = true;
+  int rimHigh = 0, rimCavity = 0;
+  for (bool cavity : {false, true}) {
+    Canvas cv(m, map, kSize, kSize);
+    for (int k = 0; k < 8; ++k) cv.dab(p, bump);
+    s.cavity = cavity;
+    cv.dab(p, s);
+    const float atCenter = moved(cv);
+    check(cavity ? atCenter == 0 : atCenter > 0.3f,
+          cavity ? "heightmask: cavity leaves the top of a hump alone"
+                 : "heightmask: the top of a hump is painted (" + std::to_string(atCenter) + ")");
+    for (size_t i = 0; i < before.size(); ++i)
+      if (cv.colorImage()[i] != before[i] && length(tx.pos[i] - p) > 0.8f * s.radius) ++(cavity ? rimCavity : rimHigh);
+  }
+  check(rimCavity > rimHigh, "heightmask: cavity paints more of the low rim (" + std::to_string(rimCavity) + " vs " +
+                                 std::to_string(rimHigh) + " texels)");
+
+  // Bump strokes ignore it.
+  Canvas plain(m, map, kSize, kSize), masked(m, map, kSize, kSize);
+  plain.dab(p, bump);
+  PaintSettings maskedBump = bump;
+  maskedBump.heightmask = true;
+  maskedBump.heightFromBump = true;
+  maskedBump.cavity = true;
+  maskedBump.heightmaskDepth = 1;
+  masked.dab(p, maskedBump);
+  check(plain.heights() == masked.heights(), "heightmask: bump strokes ignore it");
 }
 
 void testFill(const Mesh& m, const TextureMapping& map) {
@@ -541,6 +627,7 @@ void testFile(const std::string& path) {
   testDabs(m, map);
   testFill(m, map);
   testStampDabs(m, map);
+  testHeightmask(m, map);
   testMasks(m, map);
   testTangents(m, map);
   testSave(m, map, file);

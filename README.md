@@ -56,7 +56,7 @@ tests/
   brush_test.cpp      picking and all 11 brushes on real meshes
   texmap_test.cpp     UV atlas on every sample, stored UVs of painted files
   paint_test.cpp      texel baking, range query, color/bump/flatten dabs, undo,
-                      material masks, tangents, saving and loading paint data
+                      stamps, heightmask, Fill/Clear, material masks, tangents, saving and loading paint data
   brush_bench.cpp     times strokes phase by phase (not a test; brush_bench <file.sc1>)
 ```
 
@@ -110,7 +110,9 @@ paints its colors, the bump tools its brightness) from image files, for
 example Sculptris' `textures` folder; the stamp lies in the screen plane,
 turned by Angle, or follows the stroke (Directional) or turns randomly
 (Random). Surface angle falloff paints less where the surface turns away
-from the view. Shading follows paint.md 4.1: the matcap lights the paint color
+from the view. Heightmask lets Paint color reach only what lies above the
+brush area's average height, from the bump layer and/or the geometry
+(Cavity: below it; Depth makes it more selective). Shading follows paint.md 4.1: the matcap lights the paint color
 like a hard-light layer, with the bump normals. Materials: L adds a layer (up
 to 15), 0-9 choose what Paint color paints (0 the color layer, n the mask of
 layer n), M cycles the built-in matcaps of that slot, O loads a matcap image
@@ -119,7 +121,7 @@ images named in a painted .sc1 are loaded from where the file says, if they
 exist.
 
 `--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]
-[--brush-mask image] [--brush-texture image]`
+[--brush-mask image] [--brush-texture image] [--heightmask] [--cavity]`
 renders one frame (after a few demo strokes, in paint mode with paint strokes
 and a gold layer; --save saves as `<name>_bildhauer.sc1` first) and exits.
 
@@ -154,7 +156,7 @@ an MCP server. Without a native engine it only covers engine-free PE checks
 | Symmetry (half mesh, on/off, seam) | documented; brush picking on the mirror side open | `SetSymmetry` 0x412170, `Symmetry_SnapPlaneVertices` 0x411FF0 |
 | Brushes (all 11 tools) | documented, incl. slider mapping and dab path; Rotate/Scale symmetry details open | `Brush_Dispatch` 0x41A740 |
 | Picking (depth buffer in sculpt mode, ray cast + tree in paint mode) | documented; tree maintenance open | `PickDepth` 0x409200, `PickSurface` 0x408DB0 |
-| Paint mode: painting (color, bump, flatten), bump normals | documented; Fill/Clear and stamp details open | `PaintDab` 0x426B90, `PaintTexels` 0x4257A0 |
+| Paint mode: painting (color, bump, flatten), bump normals | documented, incl. Fill/Clear, stamps and heightmask | `PaintDab` 0x426B90, `PaintTexels` 0x4257A0 |
 | Paint mode: UV atlas | pipeline outlined only; bildhauer uses its own unwrapping (decision 2026-10-18) | `BuildTextureMapping` 0x4275A0 |
 | Matcap shading, material layers | documented | `data/*.gls` (behavior only), slots 0x5174B0 |
 | `.sbm` format (`SBM-V12`) | not used by Alpha 6 (legacy sidecar of old files) | |
@@ -171,6 +173,6 @@ Implementation:
 | UI: menus, tool panel (sculpt and paint), colors, material layers, status bar | done (`src/app/ui`, Dear ImGui), first version |
 | Symmetry switching with plane-valence reduction | done (`src/core/symmetry`); on and off on all samples, quads kept; Sculpt panel and Edit menu |
 | Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
-| Paint mode: brush mask and brush texture (stamps), Fill/Clear | done (`src/core/paint`, panel); stamp frame, depth falloff and stamp building after paint.md 3.2, 3.3, 3.6 |
+| Paint mode: brush mask and brush texture (stamps), Fill/Clear, heightmask | done (`src/core/paint`, panel); stamp frame, depth falloff, stamp building and heightmask ramps after paint.md 3.2, 3.3, 3.6 |
 | Paint mode: painting (color, bump, flatten), bump normals, tile undo | done (`src/core/paint`); formulas checked against paint.md, stored images load unchanged |
 | Paint mode: matcap shading with bump, material layers, saving paint data | done (`src/app`, `src/core/paint`, `src/io`); saved files load back identically and open in Sculptris Alpha 6 without visible differences (checked by hand 2026-10-21) |
