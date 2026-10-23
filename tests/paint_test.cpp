@@ -186,6 +186,21 @@ void testDabs(const Mesh& m, const TextureMapping& map) {
   check(!tiles.empty(), "undo: restored tiles are reported");
   check(!canvas.undo(), "undo: nothing left");
 
+  // The surface normal under a point is the nearest texel's.
+  check(length(canvas.surfaceNormal(p, s.radius) - tx.normal[c]) < 1e-6f, "surface normal: the nearest texel's");
+
+  // Seen at a grazing angle: a single dab facing the viewer skips the spot
+  // (angle falloff), a stroke faces the surface under its dabs and paints.
+  {
+    PaintSettings grazing = s;
+    grazing.toViewer = normalize(cross(tx.normal[c], std::fabs(tx.normal[c].x) < 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0}));
+    Canvas side(m, map, kSize, kSize);
+    side.dab(p, grazing);
+    check(side.colorImage()[c] == before[c], "angle falloff: without a surface normal it faces the viewer");
+    PaintStroke one(side, grazing, p);
+    check(sameColor(side.colorImage()[c], s.primary, 1), "angle falloff: a stroke faces the surface under the dab");
+  }
+
   // A stroke paints along its path.
   PaintStroke stroke(canvas, s, p);
   Vec3 dir = normalize(cross(tx.normal[c], {0, 1, 0}));

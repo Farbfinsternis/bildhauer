@@ -66,7 +66,7 @@ sculpting at symmetry line" (0x4B08E6, default on).
 | +0x24 | center of the current work region |
 | +0x30 | last stroke sample `B`; +0x3C the sample before it, `C` (see 2.3) |
 | +0x60 | work region radius; +0x64 region valid |
-| +0x68 | view-dependent direction used by Flatten weighting **[likely: view direction]** |
+| +0x68 | surface normal under the cursor, from the per-frame pick (3.4); used by Flatten weighting and the stamp frame |
 | +0x88 | view depth of the picked point (see 2.4 and 5) |
 | +0x8C | dab was mirrored to the +x side |
 | +0x90, +0x94 | mouse position; +0x9C, +0xA0 mouse at stroke start |
@@ -403,8 +403,9 @@ groove (s < 0: a ridge).
 Radius `r' = 1.5 r`.
 
 **Plane** (over `d < r'/2`): `a = (1 − d/(r'/2)) · (dot(V, n) + 0.5) · w`,
-where V = stroke +0x68 (view direction, so front-facing surface counts more
-**[likely]**). Then `N = normalize(Σ a·n)` and `P = Σ a·p / Σ a` (current
+where V = stroke +0x68, the surface normal under the cursor (3.4), so
+surface facing like the spot under the cursor counts more (earlier read as
+the view direction). Then `N = normalize(Σ a·n)` and `P = Σ a·p / Σ a` (current
 positions). With **Lock plane** the plane is computed only at the first dab
 of the stroke and kept (0x4B0E68 normal, 0x4FD3C4 point).
 

@@ -134,7 +134,7 @@ void Stroke::inheritCoverage(const std::vector<int>& created) {
   }
 }
 
-void Stroke::updateStampFrame(const Vec3& c, const Vec3& pointed, const StrokeInput& in) {
+Vec3 Stroke::surfaceNormal(const Vec3& c, const StrokeInput& in) const {
   const float r = s_.radius;
   Vec3 sumN;
   for (int v : region_) {
@@ -143,9 +143,14 @@ void Stroke::updateStampFrame(const Vec3& c, const Vec3& pointed, const StrokeIn
     const float d = length(vx.pos - c);
     if (d < r) sumN += vx.normal * (1 - d / r);
   }
+  if (length(sumN) > 0) return normalize(sumN);
+  return dabMirrored_ ? mirrorX(-in.viewDir) : -in.viewDir;
+}
+
+void Stroke::updateStampFrame(const Vec3& c, const Vec3& pointed, const StrokeInput& in) {
   // Built where the dab lies on screen, then mapped onto the stored half.
-  Vec3 n = length(sumN) > 0 ? normalize(sumN) : -in.viewDir;
-  if (dabMirrored_ && length(sumN) > 0) n = mirrorX(n);
+  Vec3 n = surfaceNormal(c, in);
+  if (dabMirrored_) n = mirrorX(n);
   StampFrame f;
   switch (s_.stampMode) {
     case StampMode::Fixed:
@@ -213,7 +218,7 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
     case Tool::Smooth: smooth(c); break;
     case Tool::Grab: grab(c); break;
     case Tool::Inflate: inflate(c, mirrorFor(1.5f * s_.radius)); break;
-    case Tool::Flatten: flatten(c, mirrorFor(1.5f * s_.radius), in.viewDir); break;
+    case Tool::Flatten: flatten(c, mirrorFor(1.5f * s_.radius), surfaceNormal(c, in)); break;
     case Tool::Pinch: pinch(c, mirrorFor(1.5f * s_.radius)); break;
     case Tool::Mask: mask(c); break;
     case Tool::Crease: crease(c, mirrorFor(s_.radius)); break;
@@ -418,13 +423,12 @@ void Stroke::crease(const Vec3& c, bool mirror) {
   }
 }
 
-void Stroke::flatten(const Vec3& c, bool mirror, const Vec3& viewDir) {
+void Stroke::flatten(const Vec3& c, bool mirror, const Vec3& toEye) {
   const float r = 1.5f * s_.radius, s = s_.strength, rh = r / 2;
   const Vec3 cm = mirrorX(c);
   if (!(s_.lockPlane && planeLocked_)) {
-    // View-facing weighting; viewDir points into the screen, so the surface
-    // facing the camera has dot(-viewDir, n) > 0.
-    const Vec3 toEye = -viewDir;
+    // Surface facing like the spot under the brush (toEye, brushes.md 4.5)
+    // counts more.
     Vec3 sumN, sumP;
     float sumA = 0;
     for (int v : region_) {

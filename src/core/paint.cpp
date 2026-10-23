@@ -363,9 +363,9 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
   const float meanDepth = hits_.empty() ? 0 : float(sumDepth / hits_.size());
   const float depthGain = 2.5f - std::pow(std::clamp(s.heightmaskDepth, 0.0f, 1.0f), 1.5f) * 2.48f;
 
-  // The stamp normal faces the viewer; the angle falloff measures against it.
-  const Vec3 toViewer = normalize(s.toViewer);
-  const bool angle = (s.angleFalloff || stamp) && length(toViewer) > 0;
+  // The angle falloff measures against the surface normal under the dab.
+  const Vec3 facing = normalize(length(s.normal) > 0 ? s.normal : s.toViewer);
+  const bool angle = (s.angleFalloff || stamp) && length(facing) > 0;
   const StampFrame& fr = s.frame;
   const float stampScale = 1 / (3 * r);  // the stamp covers +-1.5 r
 
@@ -397,7 +397,7 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
       sample = stamp->sample(u, v);
     }
     if (angle) {
-      const float a = (dot(hitN_[h], toViewer) - 0.15f) * 3;
+      const float a = (dot(hitN_[h], facing) - 0.15f) * 3;
       if (a < 0) continue;
       if (a < 1) f *= a;
     }
@@ -448,6 +448,27 @@ void Canvas::dab(const Vec3& center, const PaintSettings& s) {
       }
     }
   }
+}
+
+Vec3 Canvas::surfaceNormal(const Vec3& point, float radius) {
+  found_.clear();
+  grid_.query(point, radius, found_);
+  if (symmetric_) grid_.query(mirrorX(point), radius, found_);
+  Vec3 best;
+  float bestD = radius;
+  for (int i : found_) {
+    Vec3 p = texels_.pos[i], n = texels_.normal[i];
+    if (symmetric_ && length(mirrorX(p) - point) < length(p - point)) {
+      p = mirrorX(p);
+      n = mirrorX(n);
+    }
+    const float d = length(p - point);
+    if (d <= bestD) {
+      bestD = d;
+      best = n;
+    }
+  }
+  return best;
 }
 
 int Canvas::tileOf(int i) const {
@@ -598,18 +619,20 @@ void PaintStroke::moveTo(const Vec3& point, bool hit) {
 }
 
 void PaintStroke::dab(const Vec3& c) {
+  s_.normal = canvas_.surfaceNormal(c, s_.radius);
+  const Vec3 facing = length(s_.normal) > 0 ? s_.normal : s_.toViewer;
   if (s_.stamps) {
     switch (s_.stampMode) {
       case StampMode::Fixed:
-        s_.frame = fixedStampFrame(s_.toViewer, s_.screenRight, s_.screenUp, s_.stampAngle);
+        s_.frame = fixedStampFrame(facing, s_.screenRight, s_.screenUp, s_.stampAngle);
         break;
       case StampMode::Directional:
-        if (hasLastDab_ && length(c - lastDab_) > 0) direction_ += ((c - lastDab_) - direction_) * 0.3f;
-        s_.frame = directedStampFrame(s_.toViewer, direction_);
+        if (hasLastDab_ && length(c - lastDab_) > 1e-4f) direction_ += ((c - lastDab_) - direction_) * 0.3f;
+        s_.frame = directedStampFrame(facing, direction_);
         break;
       case StampMode::Random: {
         std::uniform_real_distribution<float> d(-0.5f, 0.5f);
-        s_.frame = directedStampFrame(s_.toViewer, {d(random_), d(random_), d(random_)});
+        s_.frame = directedStampFrame(facing, {d(random_), d(random_), d(random_)});
         break;
       }
     }

@@ -149,7 +149,9 @@ void beginPaintStroke(int mx, int my, bool invert) {
   s.strength = brushStrength(ps[1]) * (invert ? -1.0f : 1.0f);
   s.hardness = ps[2];
   s.target = app.editSlot;
-  // The view the stroke is painted from: stamp frame and angle falloff.
+  // The view the stroke is painted from: the screen axes turn a fixed stamp;
+  // stamp and angle falloff face the surface (PaintStroke), the viewer only
+  // where no texel is near.
   s.toViewer = -app.camera.forward();
   s.screenRight = app.camera.right();
   s.screenUp = app.camera.up();

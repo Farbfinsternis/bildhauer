@@ -20,7 +20,10 @@
 // 4.2) keep a mask per layer, painted like the color layer. Stamps (brush
 // mask and texture, 3.6) and the heightmask (3.3) follow Sculptris, the
 // latter including its use of the previous dab's mean normal, kept across
-// strokes. Not yet implemented: paint mask, Combine color and bump, Airbrush.
+// strokes. The stamp frame and the angle falloff face the surface normal
+// under the dab center, taken from the nearest texel (Sculptris: per frame,
+// from 8 picks around the cursor). Not yet implemented: paint mask, Combine
+// color and bump, Airbrush.
 
 #include <array>
 #include <cstdint>
@@ -124,7 +127,10 @@ struct PaintSettings {
   // the secondary (Ctrl) hiding it.
   int target = 0;
 
-  // The view: the stamp normal and the angle falloff face `toViewer`.
+  // The stamp frame and the angle falloff face `normal`, the surface normal
+  // under the dab (set per dab by PaintStroke); while it is zero they face
+  // `toViewer`. The screen axes turn a fixed stamp.
+  Vec3 normal;
   Vec3 toViewer{0, 0, 1}, screenRight{1, 0, 0}, screenUp{0, 1, 0};
   // Brush mask and brush texture; null paints without a stamp.
   const Stamps* stamps = nullptr;
@@ -173,6 +179,9 @@ class Canvas {
 
   // One dab at a visible surface point (mirror side included).
   void dab(const Vec3& center, const PaintSettings& s);
+  // The normal of the covered texel nearest to a visible point, within
+  // `radius` (mirror side included); zero if there is none.
+  Vec3 surfaceNormal(const Vec3& point, float radius);
 
   // Fill/Clear (paint.md 3.5) on the layer of s.tool, with `amount` the
   // tool's raw Strength slider: Paint color moves every covered texel that

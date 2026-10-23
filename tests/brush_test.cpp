@@ -265,6 +265,28 @@ void testBrushMask() {
   }
 }
 
+// Flatten weights its plane by the surface normal under the brush, not the
+// view (brushes.md 4.5): seen from behind, the view would give every vertex
+// a negative weight and nothing would move.
+void testFlattenFacing() {
+  std::printf("flatten plane weighting\n");
+  const Mesh start = patch(-1, false, true);
+  Mesh m = start;
+  BrushSettings s;
+  s.tool = Tool::Flatten;
+  s.radius = 0.5f;
+  s.detailSize = 2;
+  s.strength = 1;
+  StrokeInput in;
+  in.viewDir = {0, 0, 1};  // looking at the back of the patch
+  in.camRight = {-1, 0, 0};
+  in.camUp = {0, 1, 0};
+  Stroke stroke(m, s, in);
+  float most = 0;
+  for (int v = 0; v < m.vertexSlots(); ++v) most = std::fmax(most, length(m.vertex(v).pos - start.vertex(v).pos));
+  check(most > 0, "flatten: works whatever the view direction");
+}
+
 float surfaceDistance(const Mesh& m, const Camera& cam, const Vec3& target) {
   PickHit h = pick(m, cam.eye, normalize(target - cam.eye));
   return h.hit ? h.t : -1;
@@ -382,6 +404,7 @@ int main(int argc, char** argv) {
   testParams();
   testSymmetricStroke();
   testBrushMask();
+  testFlattenFacing();
   for (int i = 1; i < argc; ++i) testFile(argv[i]);
   std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");
   return failures ? 1 : 0;

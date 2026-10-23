@@ -18,10 +18,11 @@
 // from mirrored dabs, and only the larger of the two takes effect (Draw,
 // Inflate, Pinch, Crease, Flatten).
 //
-// Brush mask (brushes.md 3.4): the stamp frame is built per dab around the
-// dab center, its normal the vertex normals within r weighted by 1 - d/r
-// (Sculptris: per frame at the cursor, from the depth buffer), and Draw's
-// mirror pass samples a mirrored frame (Sculptris keeps the axes).
+// The surface normal under the brush (stroke +0x68: the brush mask's frame,
+// Flatten's plane weighting) is taken per dab around the dab center, from
+// the vertex normals within r weighted by 1 - d/r (Sculptris: per frame at
+// the cursor, from the depth buffer). Draw's mirror pass samples a mirrored
+// brush mask frame (Sculptris keeps the axes).
 
 #include <random>
 
@@ -90,7 +91,7 @@ class Stroke {
   void smooth(const Vec3& c);
   void grab(const Vec3& c);
   void inflate(const Vec3& c, bool mirror);
-  void flatten(const Vec3& c, bool mirror, const Vec3& viewDir);
+  void flatten(const Vec3& c, bool mirror, const Vec3& toEye);
   void pinch(const Vec3& c, bool mirror);
   void mask(const Vec3& c);
   void crease(const Vec3& c, bool mirror);
@@ -99,6 +100,9 @@ class Stroke {
 
   float weight(int v) const;
   void updateRegion(const Vec3& c);
+  // The surface normal under the dab at c (stored half): the vertex normals
+  // within r weighted by 1 - d/r; the viewer if there are none.
+  Vec3 surfaceNormal(const Vec3& c, const StrokeInput& in) const;
   // The brush mask's frame for the dab at c (stored half); `pointed` is
   // where the dab lies on screen (c, or its mirror image).
   void updateStampFrame(const Vec3& c, const Vec3& pointed, const StrokeInput& in);

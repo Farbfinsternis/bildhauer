@@ -139,23 +139,34 @@ texels: the texels found by a spatial query with radius 1.3 · r around c
 ```
 
 **Stamp frame.** Every dab builds an orthonormal frame `(A, B, N)` (passed
-to 0x426120 and kept at 0x519D3C, 0x51748C, 0x5174A4); `N` is the stamp
-normal and points toward the viewer, `A` and `B` span the stamp. Inputs
-are the view direction `w` of the stroke (stroke +0x68), the screen axes
-`X`, `Y` (rows of the view rotation, 0x4BDC60) and the stamp angle `θ`
-(0x4FD158):
+to 0x426120 and kept at 0x519D3C, 0x51748C, 0x5174A4); `A` and `B` span
+the stamp, `N = −w` is its normal. Inputs are `w` = stroke +0x68, the
+**surface normal under the cursor**, the screen axes `X`, `Y` (rows of the
+view rotation, 0x4BDC60) and the stamp angle `θ` (0x4FD158). `w` comes
+from the per-frame pick, in both modes ([brushes.md](brushes.md) 3.4):
+the pick at 8 points on a circle of 3 pixels around the mouse, the sum of
+the cross products of neighboring offsets, normalized. `PickDepth`
+(0x409200) hands paint mode's picks to `PickSurface`, so the ring works on
+the model there too. (Earlier versions of this document read +0x68 as the
+view direction.)
 
 - **Fixed (Directional off):** `U = sin θ · X − cos θ · Y` (the screen
   direction at angle θ), `A = normalize(w × U)`, `B = normalize(w × A)`,
-  `N = normalize(B × A)`. The stamp lies in the screen plane and turns
-  with θ; θ is set by dragging in the stamp preview of the UI.
+  `N = normalize(B × A) = −w`. The stamp lies in the tangent plane of the
+  surface under the cursor and turns with θ (U projected into that plane);
+  θ is set by dragging in the stamp preview of the UI.
 - **Directional:** a direction `D` (static 0x51A7C4, starting at (1, 0, 0))
-  follows the movement of the dab center: whenever the center has moved,
-  `D += 0.3 · (Δ − D)` with Δ the movement. **Random** instead takes a new
-  `D` per dab with components uniform in [−0.5, 0.5]. `D` is projected into
-  the screen plane (`D −= w · (w · D)`) and normalized; `B = D`,
-  `A = w × B`, `N = B × A` (0x415670, shared with the sculpt brush mask).
+  follows the movement of the dab center: whenever the center has moved
+  by more than 10⁻⁴, `D += 0.3 · (Δ − D)` with Δ the movement. **Random**
+  instead takes a new `D` per dab with components uniform in [−0.5, 0.5].
+  `D` is projected into the tangent plane (`D −= w · (w · D)`) and
+  normalized; `B = D`, `A = B × w`, `N = B × A = −w` (0x415670, shared with
+  the sculpt brush mask).
 - A dab mapped from the mirrored half flips the frame's x components.
+- The frame is rebuilt with each per-frame pick, so the dabs of one frame
+  share it; with Directional and Random on also after every dab.
+
+(0x4027C0, the cross product helper, returns `edx × ecx`.)
 
 Before the per-texel pass, the dab (0x426120) walks the texels in range
 with `x ≤ 1` and `w = 1 − x`:
@@ -202,7 +213,7 @@ if brush mask or brush texture enabled (a stamp is used):
     q ≤ 0 → skip                                 // full up to 0.3 r, gone at 0.45 r
     m = clamp(q · k, −1, 1)
 if surface angle falloff (or a stamp):
-    a = (dot(texelNormal, N) − 0.15) · 3        // N: the stamp normal, toward the viewer
+    a = (dot(texelNormal, w) − 0.15) · 3        // w = −N: the surface normal under the cursor
     a < 0 → skip;  a < 1 → f *= a
 if heightmask and mode 0:                        // color only, see below
     D = 2.5 − depth^1.5 · 2.48                  // depth = slider 0x4B08DC
@@ -218,8 +229,12 @@ if heightmask and mode 0:                        // color only, see below
     f *= clamp(t · D, 0, 1)
 ```
 
-The angle falloff thus favors surfaces that face the viewer; texels turned
-more than about 81° away (dot < 0.15) are not painted.
+The angle falloff thus favors texels that face like the surface under the
+cursor; texels turned more than about 81° away from it (dot < 0.15) are not
+painted, so a dab on a thin part does not reach through to its back. The
+code negates `N` for this (0x425B43) and negates it back for a mirrored
+dab (0x4C08EB = stroke +0x8C), which keeps `w` facing outward there too
+**[likely]**.
 
 **Heightmask.** The checkbox (0x4FD143) only acts on color strokes: the
 branch tests the mode (0x425C10) and bump strokes (modes 1 and 2, also the
