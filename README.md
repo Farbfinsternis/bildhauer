@@ -179,9 +179,17 @@ Implementation:
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
 | Sculpt brush mask (Draw, Smooth, Flatten) | done (`src/core/brush`, Sculpt panel); after brushes.md 3.4 |
 | Viewer: matcap rendering, mirrored half, sculpting, undo, open/save | done (`src/app`) |
-| UI: menus, tool panel (sculpt and paint), colors, material layers, status bar | done (`src/app/ui`, Dear ImGui), first version |
+| UI: tool strip with own icons, brush and model panels, mode switch, axes and view bar, status bar hints | done (`src/app/ui`, `src/app/icons`, Dear ImGui) |
 | Symmetry switching with plane-valence reduction | done (`src/core/symmetry`); on and off on all samples, quads kept; Sculpt panel and Edit menu |
 | Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
 | Paint mode: brush mask and brush texture (stamps), Fill/Clear, heightmask | done (`src/core/paint`, panel); stamp frame, depth falloff, stamp building and heightmask ramps after paint.md 3.2, 3.3, 3.6 |
 | Paint mode: painting (color, bump, flatten), bump normals, tile undo | done (`src/core/paint`); formulas checked against paint.md, stored images load unchanged |
 | Paint mode: matcap shading with bump, material layers, saving paint data | done (`src/app`, `src/core/paint`, `src/io`); saved files load back identically and open in Sculptris Alpha 6 without visible differences (checked by hand 2026-10-21) |
+
+## License
+
+bildhauer is released under the MIT License, see [LICENSE](LICENSE). This
+covers the code and the documentation in `re/docs/`. Dear ImGui in
+`third_party/imgui/` keeps its own MIT License (`third_party/imgui/LICENSE.txt`).
+Sculptris and its files remain the property of their owners; bildhauer
+contains none of them (see "Approach").
