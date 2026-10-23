@@ -71,6 +71,17 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Release builds (the ZIP on GitHub) link the C++ runtime statically, so the
+exe needs nothing but Windows:
+
+```bat
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+cmake --build build-release --target bildhauer
+```
+
+The ZIP holds `bildhauer.exe`, `README.md`, `LICENSE.txt` and Dear ImGui's license
+as `LICENSE-imgui.txt`.
+
 ### Running the viewer
 
 ```bat

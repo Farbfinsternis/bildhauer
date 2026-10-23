@@ -4,3 +4,4 @@ node_modules/
 
 # C++ build output
 build/
+build-release/

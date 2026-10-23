@@ -58,15 +58,11 @@ sculpting it.
 
 ## Status
 
-An early version for Windows. There is no download yet; to try it, build it
-from source with the Visual Studio Build Tools:
+An early version for Windows (10 and 11, 64 bit). **Download** the ZIP from
+the [Releases](https://github.com/Farbfinsternis/bildhauer/releases) page,
+unpack it anywhere and start `bildhauer.exe`; nothing needs to be installed.
 
-```bat
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build
-```
-
-Developers find the details in [DEVELOPMENT.md](DEVELOPMENT.md).
+Developers find how to build it in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## License
 
