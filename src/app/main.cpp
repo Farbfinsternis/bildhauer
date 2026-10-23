@@ -181,6 +181,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     // it keeps relaxing after the stroke until the mesh has settled.
     bool relaxing = (app.beautify || app.brush.detailFactor > 0.15f) && !app.mesh.dirtyVertices.empty();
     if (relaxing) beautifyPass(app.mesh);
+    layoutView(true);
     renderScene();
     drawUi();
     SwapBuffers(app.hdc);

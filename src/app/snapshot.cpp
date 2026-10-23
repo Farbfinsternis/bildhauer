@@ -68,39 +68,41 @@ bool writePng(const std::string& path, int w, int h, const std::vector<unsigned 
 
 // A few strokes across the front, in screen space: Draw, inverted Draw, Mask.
 void runDemo() {
+  const int cx = app.viewX + app.viewW / 2, cy = app.viewY + app.viewH / 2;
   auto strokeAcross = [&](Tool tool, bool invert, int y0) {
     app.brush.tool = tool;
-    beginStroke(app.width / 2 - 130, y0, invert, false);
+    beginStroke(cx - 130, y0, invert, false);
     for (int i = 0; i <= 40; ++i)
-      if (app.stroke) app.stroke->moveTo(inputAt(app.width / 2 - 130 + i * 6, y0 + int(20 * std::sin(i * 0.3))));
+      if (app.stroke) app.stroke->moveTo(inputAt(cx - 130 + i * 6, y0 + int(20 * std::sin(i * 0.3))));
     app.stroke.reset();
   };
   sliders(Tool::Draw) = sliders(Tool::Mask) = {0.4f, 0.5f};
-  strokeAcross(Tool::Draw, false, app.height / 2 - 90);
-  strokeAcross(Tool::Draw, true, app.height / 2);
-  strokeAcross(Tool::Mask, false, app.height / 2 + 90);
+  strokeAcross(Tool::Draw, false, cy - 90);
+  strokeAcross(Tool::Draw, true, cy);
+  strokeAcross(Tool::Mask, false, cy + 90);
   app.brush.tool = Tool::Draw;
 }
 
 // Paint strokes across the front: color, secondary color, bump.
 void runPaintDemo() {
+  const int cx = app.viewX + app.viewW / 2, cy = app.viewY + app.viewH / 2;
   auto strokeAcross = [&](PaintTool tool, bool invert, int y0) {
     app.paint.tool = tool;
-    beginPaintStroke(app.width / 2 - 70, y0, invert);
+    beginPaintStroke(cx - 70, y0, invert);
     for (int i = 0; i <= 40; ++i) {
       if (!app.paintStroke) break;
-      StrokeInput in = inputAt(app.width / 2 - 70 + i * 4, y0 + int(20 * std::sin(i * 0.3)));
+      StrokeInput in = inputAt(cx - 70 + i * 4, y0 + int(20 * std::sin(i * 0.3)));
       app.paintStroke->moveTo(in.point, in.hit);
     }
     app.paintStroke.reset();
   };
-  strokeAcross(PaintTool::Color, false, app.height / 2 - 110);
-  strokeAcross(PaintTool::Color, true, app.height / 2 - 30);
-  strokeAcross(PaintTool::Bump, false, app.height / 2 + 50);
+  strokeAcross(PaintTool::Color, false, cy - 110);
+  strokeAcross(PaintTool::Color, true, cy - 30);
+  strokeAcross(PaintTool::Bump, false, cy + 50);
   // A gold layer, painted in across the forehead.
   app.editSlot = app.canvas->addLayer("bildhauer:gold");
   app.canvas->material(app.editSlot).colored = true;
-  strokeAcross(PaintTool::Color, false, app.height / 2 - 170);
+  strokeAcross(PaintTool::Color, false, cy - 170);
   app.paint.tool = PaintTool::Color;
   app.editSlot = 0;
 }
@@ -112,6 +114,7 @@ int runSnapshot(const SnapshotOptions& o) {
   GetClientRect(app.hwnd, &rc);
   app.width = rc.right;
   app.height = rc.bottom;
+  layoutView(o.ui);
   if (o.symmetryOff) setSymmetry(false);
   if (o.paint) enterPaintMode();
   if (!o.brushMask.empty()) loadStampImage(o.brushMask, true);
@@ -140,6 +143,7 @@ int runSnapshot(const SnapshotOptions& o) {
   }
   // The UI settles over a few frames (window sizes, fonts); the last one counts.
   for (int i = 0; i < (o.ui ? 3 : 1); ++i) {
+    layoutView(o.ui);
     renderScene();
     if (o.ui) drawUi();
   }

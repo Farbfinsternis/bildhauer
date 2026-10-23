@@ -1,9 +1,12 @@
 #include "app/ui.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "app/app.h"
 #include "app/dialogs.h"
@@ -51,16 +54,79 @@ bool colorEdit(const char* label, uint32_t& color) {
   return true;
 }
 
-// A row of equally wide selectable buttons.
-bool toolButton(const char* label, bool selected, float width, const char* tooltip) {
+// A selectable button; selected ones show the accent.
+bool toolButton(const char* label, bool selected, float width, const char* tooltip, float height = 0) {
   if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  bool clicked = ImGui::Button(label, ImVec2(width, 0));
+  bool clicked = ImGui::Button(label, ImVec2(width, height));
   if (selected) ImGui::PopStyleColor();
   if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tooltip);
   return clicked;
 }
 
 void slider(const char* label, float& value) { ImGui::SliderFloat(label, &value, 0.0f, 1.0f, "%.2f"); }
+
+// Fixed layout: menu bar on top, status bar at the bottom, the tool strip and
+// the brush panel on the left, the model panel on the right; the 3D view
+// gets the rest.
+struct Layout {
+  float top, bottom, strip, panel, side;
+};
+
+Layout layout() {
+  const ImGuiStyle& st = ImGui::GetStyle();
+  const float s = st.FontScaleDpi;
+  // Before the first frame there is no font size yet: estimate the bars.
+  const float bar = ImGui::GetFontSize() > 0 ? ImGui::GetFrameHeight() : 16 * s + 2 * st.FramePadding.y;
+  return {bar, bar, 84 * s, 270 * s, 250 * s};
+}
+
+bool beginPanel(const char* id, float x, float w) {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const Layout l = layout();
+  ImGui::SetNextWindowPos(ImVec2(vp->Pos.x + x, vp->Pos.y + l.top));
+  ImGui::SetNextWindowSize(ImVec2(w, vp->Size.y - l.top - l.bottom));
+  return ImGui::Begin(id, nullptr,
+                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                          ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                          ImGuiWindowFlags_NoBringToFrontOnFocus);
+}
+
+// A larger title with a short description under it.
+void panelTitle(const char* title, const char* description) {
+  ImGui::PushFont(nullptr, ImGui::GetFontSize() / ImGui::GetStyle().FontScaleDpi * 1.35f);
+  ImGui::TextUnformatted(title);
+  ImGui::PopFont();
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+  ImGui::TextWrapped("%s", description);
+  ImGui::PopStyleColor();
+  ImGui::Spacing();
+}
+
+const char* toolDescription(Tool tool) {
+  switch (tool) {
+    case Tool::Draw: return "Builds up the surface along the stroke. Clay: flatter, layered build-up.";
+    case Tool::Smooth: return "Evens out the surface. Shift smooths with any tool.";
+    case Tool::Grab: return "Drags the surface along with the pointer.";
+    case Tool::Inflate: return "Pushes the surface out along its normals.";
+    case Tool::Flatten: return "Planes the surface down to the plane under the brush.";
+    case Tool::Pinch: return "Pulls the surface toward the middle of the brush.";
+    case Tool::Mask: return "Protects the surface from the other brushes.";
+    case Tool::Crease: return "Cuts a sharp groove; inverted, a sharp ridge.";
+    case Tool::Rotate: return "Turns the area under the brush.";
+    case Tool::Scale: return "Grows or shrinks the area under the brush.";
+    case Tool::Reduce: return "Removes detail under the brush; inverted, adds it.";
+  }
+  return "";
+}
+
+const char* paintToolDescription(PaintTool tool) {
+  switch (tool) {
+    case PaintTool::Color: return "Paints the color layer, or the mask of the selected material layer.";
+    case PaintTool::Bump: return "Paints height into the bump layer.";
+    case PaintTool::FlattenBump: return "Moves the bump back toward flat.";
+  }
+  return "";
+}
 
 void menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
@@ -94,61 +160,113 @@ void menuBar() {
     if (ImGui::MenuItem("Mouse and keys")) showKeys = true;
     ImGui::EndMenu();
   }
+
+  // The mode in the middle. Paint mode is one way: Paint asks first, and
+  // there is no way back to Sculpt.
+  const float pad = ImGui::GetStyle().FramePadding.x * 3;
+  const float sculptW = ImGui::CalcTextSize("Sculpt").x + 2 * pad, paintW = ImGui::CalcTextSize("Paint").x + 2 * pad;
+  ImGui::SetCursorPosX((ImGui::GetWindowWidth() - sculptW - paintW) / 2);
+  ImGui::BeginDisabled(app.paintMode);
+  ImGui::Selectable("Sculpt", !app.paintMode, ImGuiSelectableFlags_None, ImVec2(sculptW - 2 * pad, 0));
+  ImGui::EndDisabled();
+  if (app.paintMode && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Paint mode is one way: the mesh stays as it is");
+  if (ImGui::Selectable("Paint", app.paintMode, ImGuiSelectableFlags_None, ImVec2(paintW - 2 * pad, 0)) &&
+      !app.paintMode)
+    askEnterPaintMode();
+  if (!app.paintMode && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Asks first: painting needs a fixed mesh (Ctrl+P)");
   ImGui::EndMainMenuBar();
 }
 
 void sculptMaskPanel();
 
-void sculptPanel(float width) {
-  ImGui::SeparatorText("Brush");
-  const float column = (width - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
-  int i = 0;
-  for (const ToolButton& b : kSculptTools) {
+// The tools of the current mode, one button per row.
+void toolStrip() {
+  const Layout l = layout();
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetStyle().FramePadding.x, ImGui::GetStyle().WindowPadding.y));
+  if (beginPanel("##tools", 0, l.strip)) {
+    const ImVec2 size(-1, ImGui::GetFrameHeight() * 1.6f);
     char tip[64];
-    std::snprintf(tip, sizeof tip, "%s (%s)", toolName(b.tool), b.key);
-    if (i % 3) ImGui::SameLine();
-    if (toolButton(toolName(b.tool), app.brush.tool == b.tool, column, tip)) app.brush.tool = b.tool;
-    ++i;
+    if (!app.paintMode) {
+      for (const ToolButton& b : kSculptTools) {
+        std::snprintf(tip, sizeof tip, "%s (%s)", toolName(b.tool), b.key);
+        if (toolButton(toolName(b.tool), app.brush.tool == b.tool, size.x, tip, size.y)) app.brush.tool = b.tool;
+      }
+    } else {
+      const PaintTool tools[] = {PaintTool::Color, PaintTool::Bump, PaintTool::FlattenBump};
+      const char* labels[] = {"Color", "Bump", "Flatten"};
+      const char* keys[] = {"D", "B", "F"};
+      for (int i = 0; i < 3; ++i) {
+        std::snprintf(tip, sizeof tip, "%s (%s)", paintToolName(tools[i]), keys[i]);
+        if (toolButton(labels[i], app.paint.tool == tools[i], size.x, tip, size.y)) app.paint.tool = tools[i];
+      }
+    }
   }
-  ToolSliders& s = sliders(app.brush.tool);
-  ImGui::Spacing();
+  ImGui::End();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+}
+
+// The current sculpt brush: its sliders and options, and the brush mask.
+void sculptBrushPanel() {
+  const Tool tool = app.brush.tool;
+  panelTitle(toolName(tool), toolDescription(tool));
+  ToolSliders& s = sliders(tool);
+  ImGui::SeparatorText("Brush");
   slider("Size", s.size);
   slider("Strength", s.strength);
-  switch (app.brush.tool) {
+  auto option = [](const char* label, bool& value, const char* tip) {
+    ImGui::Checkbox(label, &value);
+    if (tip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tip);
+  };
+  switch (tool) {
     case Tool::Draw:
-      ImGui::Checkbox("Clay", &app.brush.clay);
+      option("Clay", app.brush.clay, "Flatter, layered build-up (D again)");
       ImGui::SameLine();
-      ImGui::Checkbox("Soft", &app.brush.soft);
+      option("Soft", app.brush.soft, "With Clay: softer build-up");
       break;
     case Tool::Flatten:
-      ImGui::Checkbox("Lock plane", &app.brush.lockPlane);
-      ImGui::SameLine();
-      ImGui::Checkbox("Angle falloff", &app.brush.angleFalloff);
+      option("Lock plane", app.brush.lockPlane, "Keep the plane of the stroke's first dab (F again)");
+      option("Angle falloff", app.brush.angleFalloff, "Leave surface that turns away from the plane");
       break;
     case Tool::Grab:
-      ImGui::Checkbox("Global", &app.brush.global);
+      option("Global", app.brush.global, "Move every unmasked vertex (G again)");
       ImGui::SameLine();
-      ImGui::Checkbox("Limit", &app.brush.limit);
+      option("Limit", app.brush.limit, nullptr);
       break;
-    case Tool::Rotate: ImGui::Checkbox("Global", &app.brush.global); break;
+    case Tool::Rotate: option("Global", app.brush.global, "Turn every unmasked vertex (R again)"); break;
     case Tool::Scale:
-      ImGui::Checkbox("Global", &app.brush.global);
+      option("Global", app.brush.global, "Scale every unmasked vertex (T again)");
       ImGui::SameLine();
-      ImGui::Checkbox("XYZ", &app.brush.xyz);
+      option("XYZ", app.brush.xyz, nullptr);
       break;
     default: break;
   }
-  ImGui::TextDisabled("Ctrl inverts, Shift smooths");
-  sculptMaskPanel();
+  ImGui::Spacing();
+  if (ImGui::CollapsingHeader(sculptMaskActive() ? "Brush mask (on)###brushmask" : "Brush mask###brushmask"))
+    sculptMaskPanel();
+}
 
-  ImGui::SeparatorText("Mesh");
-  ImGui::Checkbox("Beautify while sculpting", &app.beautify);
+// What concerns the whole model in sculpt mode.
+void sculptModelPanel() {
+  ImGui::SeparatorText("Model");
   bool symmetric = app.mesh.symmetric;
-  if (ImGui::Checkbox("Symmetry (mirror at x = 0)", &symmetric)) askSetSymmetry(symmetric);
-  if (ImGui::Button("Subdivide", ImVec2(width / 2 - 4, 0))) subdivideAll();
+  if (ImGui::Checkbox("Symmetry (x = 0)", &symmetric)) askSetSymmetry(symmetric);
+  ImGui::Checkbox("Beautify while sculpting", &app.beautify);
+  const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
+  if (ImGui::Button("Subdivide", ImVec2(half, 0))) subdivideAll();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Splits every triangle in four (Ctrl+D)");
   ImGui::SameLine();
   if (ImGui::Button("Reduce all", ImVec2(-1, 0))) reduceAll();
-  ImGui::Spacing();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Removes detail where the surface is flat (Ctrl+Y)");
+
+  ImGui::SeparatorText("Paint");
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+  ImGui::TextWrapped("Painting needs a fixed mesh: after entering paint mode, the model can no longer be sculpted.");
+  ImGui::PopStyleColor();
   if (ImGui::Button("Enter paint mode...", ImVec2(-1, 0))) askEnterPaintMode();
 }
 
@@ -186,8 +304,7 @@ void stampModeControls() {
 // Brush mask in sculpt mode (brushes.md 3.4): the mask image alone, read by
 // Draw, Smooth and Flatten.
 void sculptMaskPanel() {
-  ImGui::SeparatorText("Brush mask");
-  if (ImGui::Checkbox("Brush mask", &app.sculptMaskOn) && app.sculptMaskOn && app.maskImage.empty() &&
+  if (ImGui::Checkbox("Enable", &app.sculptMaskOn) && app.sculptMaskOn && app.maskImage.empty() &&
       !chooseStampImage(true))
     app.sculptMaskOn = false;
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
@@ -213,7 +330,7 @@ void sculptMaskPanel() {
 // Cavity, the low) parts within the dab.
 void heightmaskPanel() {
   PaintSettings& p = app.paint;
-  ImGui::Checkbox("Heightmask", &p.heightmask);
+  ImGui::Checkbox("Enable", &p.heightmask);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
     ImGui::SetTooltip("Paint color only reaches what lies above the brush area's average height.\n"
                       "Bump strokes ignore it.");
@@ -233,7 +350,6 @@ void heightmaskPanel() {
 
 // Brush mask and brush texture (paint.md 3.6) and how the stamp turns.
 void stampPanel() {
-  ImGui::SeparatorText("Stamp");
   bool changed = false;
   auto imageRow = [&](const char* label, bool& on, const std::string& path, bool mask) {
     ImGui::PushID(label);
@@ -327,24 +443,18 @@ void materialPanel() {
   ImGui::TextDisabled(app.editSlot == 0 ? "Paint color paints the color layer" : "Paint color paints this layer's mask");
 }
 
-void paintPanel(float width) {
-  ImGui::SeparatorText("Brush");
-  const PaintTool tools[] = {PaintTool::Color, PaintTool::Bump, PaintTool::FlattenBump};
-  const char* labels[] = {"Color", "Bump", "Flatten"};
-  const char* tips[] = {"Paint color (D)", "Paint bump (B)", "Flatten bump (F)"};
-  const float column = (width - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
-  for (int i = 0; i < 3; ++i) {
-    if (i) ImGui::SameLine();
-    if (toolButton(labels[i], app.paint.tool == tools[i], column, tips[i])) app.paint.tool = tools[i];
-  }
+// The current paint tool: its sliders, fill, colors, stamp and heightmask.
+void paintBrushPanel() {
+  const PaintTool tool = app.paint.tool;
+  panelTitle(paintToolName(tool), paintToolDescription(tool));
   std::array<float, 3>& ps = paintSliders();
-  ImGui::Spacing();
+  ImGui::SeparatorText("Brush");
   slider("Size", ps[0]);
   slider("Strength", ps[1]);
   slider("Hardness", ps[2]);
   ImGui::Checkbox("Surface angle falloff", &app.paint.angleFalloff);
-  heightmaskPanel();
-  ImGui::TextDisabled("Ctrl inverts");
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Leave surface that turns away from the spot under the brush");
   char fill[64];
   std::snprintf(fill, sizeof fill, "%s (Ctrl+F)", fillLabel());
   if (ImGui::Button(fill, ImVec2(-1, 0))) fillLayer(ImGui::GetIO().KeyShift);
@@ -359,48 +469,109 @@ void paintPanel(float width) {
   ImGui::SameLine();
   if (ImGui::SmallButton("Swap")) std::swap(app.paint.primary, app.paint.secondary);
 
-  stampPanel();
-  materialPanel();
+  ImGui::Spacing();
+  if (ImGui::CollapsingHeader(stampsActive() ? "Stamp (on)###stamp" : "Stamp###stamp")) stampPanel();
+  if (ImGui::CollapsingHeader(app.paint.heightmask ? "Heightmask (on)###heightmask" : "Heightmask###heightmask"))
+    heightmaskPanel();
+}
 
+// What concerns the whole model in paint mode: material layers and the view.
+void paintModelPanel() {
+  materialPanel();
   ImGui::SeparatorText("View");
   ImGui::Checkbox("Bump normal map (N)", &app.showBumpNormals);
 }
 
-void toolPanel() {
-  const ImGuiViewport* vp = ImGui::GetMainViewport();
-  const float top = ImGui::GetFrameHeight(), bottom = ImGui::GetFrameHeight();
-  const float width = 280 * ImGui::GetStyle().FontScaleDpi;
-  ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + top));
-  ImGui::SetNextWindowSize(ImVec2(width, vp->Size.y - top - bottom));
-  ImGui::Begin(app.paintMode ? "Paint" : "Sculpt", nullptr,
-               ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-                   ImGuiWindowFlags_NoSavedSettings);
-  const float inner = ImGui::GetContentRegionAvail().x;
-  ImGui::PushItemWidth(inner * 0.62f);
-  if (app.paintMode) paintPanel(inner);
-  else sculptPanel(inner);
-  ImGui::PopItemWidth();
+void panels() {
+  const Layout l = layout();
+  if (beginPanel("##brush", l.strip, l.panel)) {
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.62f);
+    if (app.paintMode) paintBrushPanel();
+    else sculptBrushPanel();
+    ImGui::PopItemWidth();
+  }
   ImGui::End();
+  if (beginPanel("##model", ImGui::GetMainViewport()->Size.x - l.side, l.side)) {
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.62f);
+    if (app.paintMode) paintModelPanel();
+    else sculptModelPanel();
+    if (!app.paintMode) ImGui::SeparatorText("View");
+    ImGui::Checkbox("Wireframe (W)", &app.wireframe);
+    ImGui::PopItemWidth();
+  }
+  ImGui::End();
+}
+
+// Mouse buttons and keys for what the current tool does.
+std::vector<std::pair<const char*, const char*>> hints() {
+  std::vector<std::pair<const char*, const char*>> h;
+  if (!app.paintMode) {
+    switch (app.brush.tool) {
+      case Tool::Mask: h = {{"LMB", "mask"}, {"Ctrl", "unmask"}}; break;
+      case Tool::Grab:
+      case Tool::Rotate:
+      case Tool::Scale: h = {{"LMB", "drag"}}; break;
+      case Tool::Reduce: h = {{"LMB", "reduce"}, {"Ctrl", "add detail"}}; break;
+      default: h = {{"LMB", "sculpt"}, {"Ctrl", "invert"}}; break;
+    }
+    h.push_back({"Shift", "smooth"});
+  } else {
+    switch (app.paint.tool) {
+      case PaintTool::Color:
+        h = {{"LMB", "paint"}, {"Ctrl", app.editSlot > 0 ? "erase mask" : "secondary color"}};
+        break;
+      case PaintTool::Bump: h = {{"LMB", "raise"}, {"Ctrl", "lower"}}; break;
+      case PaintTool::FlattenBump: h = {{"LMB", "flatten"}}; break;
+    }
+  }
+  h.insert(h.end(), {{"RMB", "orbit"}, {"MMB", "pan"}, {"Wheel", "zoom"}, {"[ ]", "size"}});
+  return h;
 }
 
 void statusBar() {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
-  const float h = ImGui::GetFrameHeight();
+  const float h = layout().bottom;
   ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + vp->Size.y - h));
   ImGui::SetNextWindowSize(ImVec2(vp->Size.x, h));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetStyle().FramePadding.x * 2, 0));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
   ImGui::Begin("##status", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                    ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus);
   ImGui::AlignTextToFramePadding();
   ImGui::TextUnformatted(app.status.c_str());
-  char right[256];
-  std::snprintf(right, sizeof right, "%s%s   %d triangles   %s", app.path.empty() ? "new model" : fileName(app.path).c_str(),
-                app.modified ? " *" : "", app.mesh.numTriangles(), app.paintMode ? "paint mode" : "sculpt mode");
-  ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::CalcTextSize(right).x - ImGui::GetStyle().FramePadding.x * 2);
-  ImGui::TextDisabled("%s", right);
+  const float statusEnd = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+
+  // Right: the hints, keys bright and what they do dim; left of them the model.
+  const float gap = ImGui::CalcTextSize("   ").x, space = ImGui::CalcTextSize(" ").x;
+  const auto pairs = hints();
+  float hintsW = 0;
+  for (const auto& [key, what] : pairs) hintsW += ImGui::CalcTextSize(key).x + space + ImGui::CalcTextSize(what).x + gap;
+  char info[256];
+  std::snprintf(info, sizeof info, "%s%s   %d triangles", app.path.empty() ? "new model" : fileName(app.path).c_str(),
+                app.modified ? " *" : "", app.mesh.numTriangles());
+  const float right = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x;
+  float x = right - hintsW;
+  const float infoX = x - gap - ImGui::CalcTextSize(info).x;
+  const bool showHints = infoX > statusEnd + gap;
+  if (showHints) {
+    for (const auto& [key, what] : pairs) {
+      ImGui::SameLine(x);
+      ImGui::TextUnformatted(key);
+      x += ImGui::CalcTextSize(key).x + space;
+      ImGui::SameLine(x);
+      ImGui::TextDisabled("%s", what);
+      x += ImGui::CalcTextSize(what).x + gap;
+    }
+  }
+  const float infoAt = showHints ? infoX : right - ImGui::CalcTextSize(info).x;
+  if (infoAt > statusEnd + gap) {
+    ImGui::SameLine(infoAt);
+    ImGui::TextDisabled("%s", info);
+  }
   ImGui::End();
+  ImGui::PopStyleColor();
   ImGui::PopStyleVar(2);
 }
 
@@ -523,6 +694,18 @@ void initUi(HWND hwnd) {
   ImGui_ImplOpenGL2_Init();
 }
 
+void layoutView(bool withUi) {
+  app.viewX = app.viewY = 0;
+  app.viewW = app.width;
+  app.viewH = app.height;
+  if (!withUi || !ImGui::GetCurrentContext()) return;
+  const Layout l = layout();
+  app.viewX = int(l.strip + l.panel);
+  app.viewY = int(l.top);
+  app.viewW = std::max(1, app.width - app.viewX - int(l.side));
+  app.viewH = std::max(1, app.height - app.viewY - int(l.bottom));
+}
+
 void shutdownUi() {
   ImGui_ImplOpenGL2_Shutdown();
   ImGui_ImplWin32_Shutdown();
@@ -538,7 +721,8 @@ void drawUi() {
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
   menuBar();
-  toolPanel();
+  toolStrip();
+  panels();
   statusBar();
   dialogs();
   ImGui::Render();

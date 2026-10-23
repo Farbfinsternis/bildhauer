@@ -359,10 +359,11 @@ void renderScene() {
   glViewport(0, 0, app.width, app.height);
   glClearColor(0.16f, 0.17f, 0.19f, 1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  glViewport(app.viewX, app.height - app.viewY - app.viewH, app.viewW, app.viewH);
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
   float nearZ = app.sceneSize * 0.01f, farZ = app.sceneSize * 50;
-  float top = nearZ * std::tan(kFov / 2), right = top * float(app.width) / float(std::max(app.height, 1));
+  float top = nearZ * std::tan(kFov / 2), right = top * float(app.viewW) / float(std::max(app.viewH, 1));
   glFrustum(-right, right, -top, top, nearZ, farZ);
   loadView();
 

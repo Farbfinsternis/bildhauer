@@ -77,10 +77,13 @@ ctest --test-dir build --output-on-failure
 build\bildhauer.exe "F:\Grafik\Sculptris Alpha 6\models\head.sc1"
 ```
 
-Without a file it starts with an icosphere. The panel on the left holds the
-tools, their sliders and options, and in paint mode the colors and material
-layers; the menus hold the file and mesh commands. Help > Mouse and keys
-lists the shortcuts.
+Without a file it starts with an icosphere. The tools sit in a strip on the
+left, next to the panel of the current tool (sliders, options, brush mask;
+in paint mode also colors, stamp and heightmask); the panel on the right
+holds what concerns the whole model (symmetry, subdivide, reduce; in paint
+mode the material layers). The mode is shown in the middle of the menu bar,
+the status bar names the mouse buttons and keys of the current tool, and
+Help > Mouse and keys lists all shortcuts.
 
 Mouse: LMB sculpts or paints (Ctrl inverts; sculpt: with Mask Ctrl unmasks,
 Shift smooths), RMB or Alt+LMB orbit, MMB pan, wheel zoom.

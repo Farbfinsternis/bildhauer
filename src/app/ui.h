@@ -1,7 +1,8 @@
 #pragma once
 
-// The user interface (Dear ImGui), drawn over the 3D view: menu bar, a tool
-// panel for sculpt and paint mode with the material layers, a status bar.
+// The user interface (Dear ImGui) around the 3D view: menu bar with the mode,
+// the tool strip and the brush panel on the left, the model panel on the
+// right (material layers in paint mode), a status bar with mouse and key hints.
 
 #include <windows.h>
 
@@ -13,6 +14,10 @@ void shutdownUi();
 
 // Feeds a window message to the UI; true if the UI consumed it entirely.
 bool uiHandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+
+// Sets the 3D view (app.viewX ...) to what the panels leave free, or to the
+// whole window without UI. Call before rendering and after resizing.
+void layoutView(bool withUi);
 
 // One UI frame over what is in the back buffer.
 void drawUi();

@@ -102,9 +102,9 @@ void onSculptKey(WPARAM key, bool ctrl) {
 
 StrokeInput inputAt(int mx, int my, PickHit* hitOut) {
   const Camera& c = app.camera;
-  float aspect = float(app.width) / float(std::max(app.height, 1));
-  float x = (2.0f * mx / app.width - 1) * std::tan(kFov / 2) * aspect;
-  float y = (1 - 2.0f * my / app.height) * std::tan(kFov / 2);
+  float aspect = float(app.viewW) / float(std::max(app.viewH, 1));
+  float x = (2.0f * (mx - app.viewX) / app.viewW - 1) * std::tan(kFov / 2) * aspect;
+  float y = (1 - 2.0f * (my - app.viewY) / app.viewH) * std::tan(kFov / 2);
   StrokeInput in;
   in.rayOrigin = c.eye();
   in.rayDir = normalize(c.forward() + c.right() * x + c.up() * y);
@@ -198,7 +198,7 @@ void onMouseMove(int x, int y) {
     app.camera.yaw -= dx * 0.008f;
     app.camera.pitch = std::clamp(app.camera.pitch + dy * 0.008f, -1.5f, 1.5f);
   } else if (app.panning) {
-    float scale = app.camera.distance * 2 * std::tan(kFov / 2) / float(app.height);
+    float scale = app.camera.distance * 2 * std::tan(kFov / 2) / float(app.viewH);
     app.camera.target += (app.camera.right() * float(-dx) + app.camera.up() * float(dy)) * scale;
   }
   StrokeInput in = inputAt(x, y, &app.hover);

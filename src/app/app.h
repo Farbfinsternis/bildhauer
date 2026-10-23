@@ -45,6 +45,9 @@ struct App {
   HWND hwnd = nullptr;
   HDC hdc = nullptr;
   int width = 1280, height = 800;
+  // The 3D view: the part of the window the UI panels leave free, in client
+  // pixels from the top left (layoutView).
+  int viewX = 0, viewY = 0, viewW = 1280, viewH = 800;
 
   Mesh mesh;
   Sc1File file;          // keeps extension values for saving
