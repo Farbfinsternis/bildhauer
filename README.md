@@ -81,7 +81,9 @@ Without a file it starts with an icosphere. The tools sit in a strip on the
 left (own icons, drawn as vector shapes: `src/app/icons.cpp`), next to the panel of the current tool (sliders, options, brush mask;
 in paint mode also colors, stamp and heightmask); the panel on the right
 holds what concerns the whole model (symmetry, subdivide, reduce; in paint
-mode the material layers). The mode is shown in the middle of the menu bar,
+mode the material layers). In the view, the axes at the top right show the
+camera and turn it to a side on click; the bar at the bottom frames the model
+and toggles the wireframe. The mode is shown in the middle of the menu bar,
 the status bar names the mouse buttons and keys of the current tool, and
 Help > Mouse and keys lists all shortcuts.
 

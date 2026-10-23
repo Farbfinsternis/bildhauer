@@ -519,8 +519,6 @@ void panels() {
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.62f);
     if (app.paintMode) paintModelPanel();
     else sculptModelPanel();
-    if (!app.paintMode) ImGui::SeparatorText("View");
-    ImGui::Checkbox("Wireframe (W)", &app.wireframe);
     ImGui::PopItemWidth();
   }
   ImGui::End();
@@ -593,6 +591,125 @@ void statusBar() {
   if (infoAt > statusEnd + gap) {
     ImGui::SameLine(infoAt);
     ImGui::TextDisabled("%s", info);
+  }
+  ImGui::End();
+  ImGui::PopStyleColor();
+  ImGui::PopStyleVar(2);
+}
+
+// --- view overlay -------------------------------------------------------------
+
+constexpr ImGuiWindowFlags kOverlayFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                           ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                           ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav;
+
+// The world axes as the camera sees them, top right in the view. Clicking an
+// axis looks at the model from that side.
+void axisGizmo() {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const float s = ImGui::GetStyle().FontScaleDpi, size = 92 * s, pad = 8 * s;
+  ImGui::SetNextWindowPos(ImVec2(vp->Pos.x + app.viewX + app.viewW - size - pad, vp->Pos.y + app.viewY + pad));
+  ImGui::SetNextWindowSize(ImVec2(size, size));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  if (ImGui::Begin("##axes", nullptr, kOverlayFlags | ImGuiWindowFlags_NoBackground)) {
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##axes", ImVec2(size, size));
+    const bool hovered = ImGui::IsItemHovered(), clicked = ImGui::IsItemClicked();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 c(p.x + size / 2, p.y + size / 2);
+    const float reach = size * 0.33f, knob = size * 0.1f;
+    const Camera& cam = app.camera;
+    struct Axis {
+      Vec3 d;
+      ImU32 color;
+      const char* label;  // null: the negative end
+      float yaw, pitch;   // camera looking from this side
+      const char* tip;
+    };
+    const ImU32 red = IM_COL32(214, 92, 92, 255), green = IM_COL32(120, 190, 92, 255), blue = IM_COL32(92, 140, 228, 255);
+    const Axis axes[6] = {
+        {{1, 0, 0}, red, "X", kPi / 2, 0, "View from +X (right)"},
+        {{-1, 0, 0}, red, nullptr, -kPi / 2, 0, "View from -X (left)"},
+        {{0, 1, 0}, green, "Y", cam.yaw, 1.5f, "View from +Y (top)"},
+        {{0, -1, 0}, green, nullptr, cam.yaw, -1.5f, "View from -Y (bottom)"},
+        {{0, 0, 1}, blue, "Z", 0, 0, "View from +Z (front)"},
+        {{0, 0, -1}, blue, nullptr, kPi, 0, "View from -Z (back)"},
+    };
+    ImVec2 at[6];
+    int order[6];
+    for (int k = 0; k < 6; ++k) {
+      at[k] = ImVec2(c.x + dot(axes[k].d, cam.right()) * reach, c.y - dot(axes[k].d, cam.up()) * reach);
+      order[k] = k;
+    }
+    // Far ends first, so the near ones draw over them.
+    std::sort(order, order + 6, [&](int a, int b) { return dot(axes[a].d, cam.forward()) > dot(axes[b].d, cam.forward()); });
+    int hit = -1;
+    if (hovered) {
+      const ImVec2 m = ImGui::GetMousePos();
+      for (int k : order) {  // the nearest end wins: it is drawn last
+        const float dx = m.x - at[k].x, dy = m.y - at[k].y;
+        if (dx * dx + dy * dy <= knob * knob) hit = k;
+      }
+      dl->AddCircleFilled(c, size * 0.48f, ImGui::GetColorU32(ImGuiCol_WindowBg, 0.6f));
+    }
+    for (int k : order) {
+      const Axis& a = axes[k];
+      if (a.label) {
+        dl->AddLine(c, at[k], a.color, 2 * s);
+        dl->AddCircleFilled(at[k], knob, a.color);
+        const ImVec2 ts = ImGui::CalcTextSize(a.label);
+        dl->AddText(ImVec2(at[k].x - ts.x / 2, at[k].y - ts.y / 2), IM_COL32(20, 20, 24, 255), a.label);
+      } else {
+        dl->AddCircleFilled(at[k], knob * 0.8f, (a.color & ~IM_COL32_A_MASK) | IM_COL32(0, 0, 0, 90));
+        dl->AddCircle(at[k], knob * 0.8f, a.color, 0, 1.5f * s);
+      }
+      if (k == hit) dl->AddCircle(at[k], knob + 2 * s, IM_COL32(255, 255, 255, 220), 0, 1.5f * s);
+    }
+    if (hit >= 0) {
+      ImGui::SetTooltip("%s", axes[hit].tip);
+      if (clicked) {
+        app.camera.yaw = axes[hit].yaw;
+        app.camera.pitch = axes[hit].pitch;
+      }
+    }
+  }
+  ImGui::End();
+  ImGui::PopStyleVar();
+}
+
+// An icon button for the view bar.
+bool viewButton(const char* id, Icon icon, bool selected, const char* tooltip) {
+  const float side = ImGui::GetFrameHeight() * 1.4f;
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  const bool clicked = ImGui::InvisibleButton(id, ImVec2(side, side));
+  const bool hovered = ImGui::IsItemHovered();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  if (selected || hovered)
+    dl->AddRectFilled(p, ImVec2(p.x + side, p.y + side),
+                      ImGui::GetColorU32(selected ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered),
+                      ImGui::GetStyle().FrameRounding);
+  drawIcon(dl, icon, ImVec2(p.x + side / 2, p.y + side / 2), side * 0.6f, ImGui::GetColorU32(ImGuiCol_Text));
+  if (hovered && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tooltip);
+  return clicked;
+}
+
+// A small bar at the bottom of the view: frame the model, wireframe.
+void viewBar() {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const ImGuiStyle& st = ImGui::GetStyle();
+  const float side = ImGui::GetFrameHeight() * 1.4f, pad = 8 * st.FontScaleDpi;
+  const ImVec2 padding(st.FramePadding.x, st.FramePadding.x);
+  const float w = 2 * side + st.ItemSpacing.x + 2 * padding.x, h = side + 2 * padding.y;
+  ImGui::SetNextWindowPos(
+      ImVec2(vp->Pos.x + app.viewX + (app.viewW - w) / 2, vp->Pos.y + app.viewY + app.viewH - h - pad));
+  ImGui::SetNextWindowSize(ImVec2(w, h));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, padding);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, st.FrameRounding * 2);
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_PopupBg));
+  if (ImGui::Begin("##viewbar", nullptr, kOverlayFlags)) {
+    if (viewButton("##frame", Icon::Frame, false, "Frame the model (front view)")) frameModel();
+    ImGui::SameLine();
+    if (viewButton("##wire", Icon::Wireframe, app.wireframe, "Wireframe (W)")) app.wireframe = !app.wireframe;
   }
   ImGui::End();
   ImGui::PopStyleColor();
@@ -747,6 +864,8 @@ void drawUi() {
   menuBar();
   toolStrip();
   panels();
+  axisGizmo();
+  viewBar();
   statusBar();
   dialogs();
   ImGui::Render();

@@ -165,6 +165,23 @@ void drawIcon(ImDrawList* list, Icon icon, ImVec2 center, float size, ImU32 ink,
       p.profile([](float) { return -0.45f; }, ink);
       p.arrow(0, 0.85f, 0, 0.25f);
       break;
+    case Icon::Frame:  // a viewfinder: four corners around the model
+      for (float sx : {-1.0f, 1.0f})
+        for (float sy : {-1.0f, 1.0f}) {
+          p.segment(0.85f * sx, 0.85f * sy, 0.4f * sx, 0.85f * sy);
+          p.segment(0.85f * sx, 0.85f * sy, 0.85f * sx, 0.4f * sy);
+        }
+      list->AddCircleFilled(p.at(0, 0), 0.3f * p.h, fill);
+      list->AddCircle(p.at(0, 0), 0.3f * p.h, ink, 0, p.line);
+      break;
+    case Icon::Wireframe:  // a cube in wireframe
+      list->AddRect(p.at(-0.8f, 0.4f), p.at(0.4f, -0.8f), ink, 0, 0, p.line);
+      list->AddRect(p.at(-0.4f, 0.8f), p.at(0.8f, -0.4f), faint, 0, 0, p.line);
+      p.segment(-0.8f, 0.4f, -0.4f, 0.8f);
+      p.segment(0.4f, 0.4f, 0.8f, 0.8f);
+      p.segment(0.4f, -0.8f, 0.8f, -0.4f);
+      list->AddLine(p.at(-0.8f, -0.8f), p.at(-0.4f, -0.4f), faint, p.line);
+      break;
   }
 }
 
