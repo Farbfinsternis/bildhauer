@@ -46,6 +46,7 @@ if(WIN32)
     src/app/dialogs.cpp
     src/app/document.cpp
     src/app/gl2.cpp
+    src/app/icons.cpp
     src/app/images.cpp
     src/app/input.cpp
     src/app/matcaps.cpp

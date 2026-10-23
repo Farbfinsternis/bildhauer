@@ -78,7 +78,7 @@ build\bildhauer.exe "F:\Grafik\Sculptris Alpha 6\models\head.sc1"
 ```
 
 Without a file it starts with an icosphere. The tools sit in a strip on the
-left, next to the panel of the current tool (sliders, options, brush mask;
+left (own icons, drawn as vector shapes: `src/app/icons.cpp`), next to the panel of the current tool (sliders, options, brush mask;
 in paint mode also colors, stamp and heightmask); the panel on the right
 holds what concerns the whole model (symmetry, subdivide, reduce; in paint
 mode the material layers). The mode is shown in the middle of the menu bar,

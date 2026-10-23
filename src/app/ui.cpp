@@ -11,6 +11,7 @@
 #include "app/app.h"
 #include "app/dialogs.h"
 #include "app/document.h"
+#include "app/icons.h"
 #include "app/input.h"
 #include "app/matcaps.h"
 #include "imgui.h"
@@ -54,15 +55,6 @@ bool colorEdit(const char* label, uint32_t& color) {
   return true;
 }
 
-// A selectable button; selected ones show the accent.
-bool toolButton(const char* label, bool selected, float width, const char* tooltip, float height = 0) {
-  if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  bool clicked = ImGui::Button(label, ImVec2(width, height));
-  if (selected) ImGui::PopStyleColor();
-  if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tooltip);
-  return clicked;
-}
-
 void slider(const char* label, float& value) { ImGui::SliderFloat(label, &value, 0.0f, 1.0f, "%.2f"); }
 
 // Fixed layout: menu bar on top, status bar at the bottom, the tool strip and
@@ -92,8 +84,19 @@ bool beginPanel(const char* id, float x, float w) {
 }
 
 // A larger title with a short description under it.
-void panelTitle(const char* title, const char* description) {
+// The paint color as an ImGui color (canvas colors are 0x00BBGGRR).
+ImU32 paintColor() { return app.paint.primary | 0xFF000000u; }
+
+// The tool icon, a larger title beside it, and a short description below.
+void panelTitle(Icon icon, const char* title, const char* description) {
   ImGui::PushFont(nullptr, ImGui::GetFontSize() / ImGui::GetStyle().FontScaleDpi * 1.35f);
+  const float side = ImGui::GetFontSize() * 1.5f;
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  drawIcon(ImGui::GetWindowDrawList(), icon, ImVec2(p.x + side / 2, p.y + side / 2), side,
+           ImGui::GetColorU32(ImGuiCol_Text), paintColor());
+  ImGui::Dummy(ImVec2(side, side));
+  ImGui::SameLine();
+  ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (side - ImGui::GetFontSize()) / 2);
   ImGui::TextUnformatted(title);
   ImGui::PopFont();
   ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -181,18 +184,39 @@ void menuBar() {
 
 void sculptMaskPanel();
 
+// A tool button of the strip: the icon with a small label under it.
+bool stripButton(const char* label, Icon icon, bool selected, const char* tooltip) {
+  const ImGuiStyle& st = ImGui::GetStyle();
+  const float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetFrameHeight() * 2.3f;
+  ImGui::PushID(label);
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  const bool clicked = ImGui::InvisibleButton("##tool", ImVec2(w, h));
+  const bool hovered = ImGui::IsItemHovered();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImGuiCol bg = selected ? ImGuiCol_ButtonActive : hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button;
+  dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(bg), st.FrameRounding);
+  const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);
+  drawIcon(dl, icon, ImVec2(p.x + w / 2, p.y + h * 0.39f), h * 0.54f, ink, paintColor());
+  ImGui::PushFont(nullptr, ImGui::GetFontSize() / st.FontScaleDpi * 0.85f);
+  const ImVec2 ts = ImGui::CalcTextSize(label);
+  dl->AddText(ImVec2(p.x + (w - ts.x) / 2, p.y + h - ts.y - st.FramePadding.y), ink, label);
+  ImGui::PopFont();
+  if (tooltip && hovered && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tooltip);
+  ImGui::PopID();
+  return clicked;
+}
+
 // The tools of the current mode, one button per row.
 void toolStrip() {
   const Layout l = layout();
   ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetStyle().FramePadding.x, ImGui::GetStyle().WindowPadding.y));
   if (beginPanel("##tools", 0, l.strip)) {
-    const ImVec2 size(-1, ImGui::GetFrameHeight() * 1.6f);
     char tip[64];
     if (!app.paintMode) {
       for (const ToolButton& b : kSculptTools) {
         std::snprintf(tip, sizeof tip, "%s (%s)", toolName(b.tool), b.key);
-        if (toolButton(toolName(b.tool), app.brush.tool == b.tool, size.x, tip, size.y)) app.brush.tool = b.tool;
+        if (stripButton(toolName(b.tool), toolIcon(b.tool), app.brush.tool == b.tool, tip)) app.brush.tool = b.tool;
       }
     } else {
       const PaintTool tools[] = {PaintTool::Color, PaintTool::Bump, PaintTool::FlattenBump};
@@ -200,7 +224,7 @@ void toolStrip() {
       const char* keys[] = {"D", "B", "F"};
       for (int i = 0; i < 3; ++i) {
         std::snprintf(tip, sizeof tip, "%s (%s)", paintToolName(tools[i]), keys[i]);
-        if (toolButton(labels[i], app.paint.tool == tools[i], size.x, tip, size.y)) app.paint.tool = tools[i];
+        if (stripButton(labels[i], paintToolIcon(tools[i]), app.paint.tool == tools[i], tip)) app.paint.tool = tools[i];
       }
     }
   }
@@ -212,7 +236,7 @@ void toolStrip() {
 // The current sculpt brush: its sliders and options, and the brush mask.
 void sculptBrushPanel() {
   const Tool tool = app.brush.tool;
-  panelTitle(toolName(tool), toolDescription(tool));
+  panelTitle(toolIcon(tool), toolName(tool), toolDescription(tool));
   ToolSliders& s = sliders(tool);
   ImGui::SeparatorText("Brush");
   slider("Size", s.size);
@@ -446,7 +470,7 @@ void materialPanel() {
 // The current paint tool: its sliders, fill, colors, stamp and heightmask.
 void paintBrushPanel() {
   const PaintTool tool = app.paint.tool;
-  panelTitle(paintToolName(tool), paintToolDescription(tool));
+  panelTitle(paintToolIcon(tool), paintToolName(tool), paintToolDescription(tool));
   std::array<float, 3>& ps = paintSliders();
   ImGui::SeparatorText("Brush");
   slider("Size", ps[0]);
