@@ -49,7 +49,7 @@ current tool):
 | Global [G/R/T] | 0x4FD150 | Grab, Rotate, Scale |
 | Limit [S] | 0x4FD155 | Grab, Rotate, Scale |
 | XYZ [S] | 0x4B08E4 | Scale |
-| Brush mask, Enable | 0x4FD13F | all with a stencil (see 3.4) |
+| Brush mask, Enable | 0x4FD13F | Draw, Smooth and Flatten, with 0x4FD163 (see 3.4) |
 
 Global settings: respect the mask (0x4B08EF, default on), "Compensate
 sculpting at symmetry line" (0x4B08E6, default on).
@@ -245,13 +245,53 @@ radius is therefore `r/k`. Some use `sin(t·π/2)` or `t²` instead.
   (`Vertex_MarkDirty`), so the per-frame beautify pass relaxes the area
   (see [mesh-core.md](mesh-core.md) 5.2).
 
-### 3.4 Brush mask (stencil) **[likely]**
+### 3.4 Brush mask (stencil) **[sure unless marked]**
 
-When a brush mask image is loaded and enabled (0x4FD163 and 0x4FD13F),
-0x415B20 projects the vertex into the brush frame (center 0x4B0F14, axes at
-0x4B0F24/0x4B0F30/0x4B0F3C, size 0x4B0F20 × 0.6) and samples the image
-bilinearly. Outside it the value is 0. **The sample replaces the radial
-falloff value `t`.**
+Sculpt mode uses the brush mask of paint mode ([paint.md](paint.md) 3.6),
+without the brush texture: switching "Brush mask" (0x4FD13F) in sculpt mode
+(tool panel checkbox, key, or "Enable" in the brush window) copies its state
+to 0x4FD163 and turns "Brush texture" (0x4FD141) off. A brush reads the mask
+when both 0x4FD163 and 0x4FD13F are set. Only **Draw, Smooth and Flatten**
+read it.
+
+**Frame.** The stamp frame of paint.md 3.2 (0x415670, Fixed / Directional /
+Random alike), here with `A` = 0x4B0F3C, `B` = 0x4B0F24, `N` = 0x4B0F30:
+
+- center = the picked point under the cursor, x made ≥ 0 with symmetry;
+  size `S = 2r` (0x4B0F20); a dab mirrored to the +x side flips `A`.
+- `w` (stroke +0x68) is in sculpt mode the **surface normal under the
+  cursor**: every frame Sculptris reads the depth at 8 points on a circle of
+  3 pixels around the mouse (0x450F6B) and sums the cross products of
+  neighboring offsets (0x45100A), x negated for a mirrored pick. Draw with
+  the mask overwrites it per dab with `normalize(Σ (d/r) · n)` over the
+  vertices within r (0x414E90; the weight grows outward) **[as read]**.
+- The frame is rebuilt each frame at the cursor pick (0x450EC5), so all
+  dabs of a frame share it; with Directional and Random on it is rebuilt
+  after every dab as well (0x454E78). In sculpt mode the Directional and
+  Random branch negates `B` (argument 1 of 0x415670).
+
+**Sample** (0x415B20) for a vertex `p`; the image is the color stamp
+(0x51722C), i.e. white with the mask's alpha (inverted with Invert):
+
+```
+e  = p − center;   d = e · N;   e' = e − d · N
+u  = (e' · A) / (0.6 S) + 0.5           // the stamp covers ±0.6 r
+v  = −(e' · B) / (0.6 S) + 0.5
+outside [0, 1]² → 0
+m  = α(u, v) / 255 · clamp(2 · (1 − |d| / S), 0, 1)   // full up to |d| = r, gone at 2r
+```
+
+With `B` as in paint.md 3.2 the minus sign makes `v` run down the screen,
+so at angle 0 the image stands upright as in paint mode **[likely]**.
+
+**Use.** The mask is sampled only for vertices inside the brush's radial
+range (`t > 0`) and replaces the falloff there:
+
+- **Draw** (pass 2): `f = m · w` instead of `smooth(t) · w`. The mirror pass
+  samples with the center mirrored (`−c.x`) but the axes unchanged
+  **[as read]**.
+- **Smooth:** `t = m`, so the step uses `sin(m · π/2)`.
+- **Flatten:** `t = m` before `f = smooth(t)`.
 
 ### 3.5 Tessellation **[sure]**
 
@@ -298,7 +338,7 @@ Clay:    S = |s|^0.8 · 0.7;   a = S
 **Pass 2, move.** For vertices with `t = 1 − 1.2·d/r > 0`:
 
 ```
-f    = smooth(t) · w                       (brush mask replaces t)
+f    = smooth(t) · w                       (brush mask: f = m · w, 3.4)
 G    = p − N·dot(N, p − R) + sign(s)·N·h   // plane through R, raised by h
 Δ    = G − p
 if dot(n, Δ) · s > 0:  p += Δ · f · k      // only outward for s > 0

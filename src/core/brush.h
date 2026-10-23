@@ -17,9 +17,17 @@
 // vertex counts per stroke what it received from dabs on its own side and
 // from mirrored dabs, and only the larger of the two takes effect (Draw,
 // Inflate, Pinch, Crease, Flatten).
+//
+// Brush mask (brushes.md 3.4): the stamp frame is built per dab around the
+// dab center, its normal the vertex normals within r weighted by 1 - d/r
+// (Sculptris: per frame at the cursor, from the depth buffer), and Draw's
+// mirror pass samples a mirrored frame (Sculptris keeps the axes).
+
+#include <random>
 
 #include "core/dab_path.h"
 #include "core/mesh.h"
+#include "core/paint.h"
 
 namespace bh {
 
@@ -40,6 +48,12 @@ struct BrushSettings {
   bool global = false, limit = false, xyz = false;  // Grab, Rotate, Scale
   bool respectMask = true;
   bool compensateSymmetry = true;
+
+  // Brush mask: Draw, Smooth and Flatten take the stamp's alpha as their
+  // falloff. Null: no mask.
+  const Stamp* stamp = nullptr;
+  StampMode stampMode = StampMode::Fixed;
+  float stampAngle = 0;  // radians, for StampMode::Fixed
 };
 
 struct StrokeInput {
@@ -85,6 +99,12 @@ class Stroke {
 
   float weight(int v) const;
   void updateRegion(const Vec3& c);
+  // The brush mask's frame for the dab at c (stored half); `pointed` is
+  // where the dab lies on screen (c, or its mirror image).
+  void updateStampFrame(const Vec3& c, const Vec3& pointed, const StrokeInput& in);
+  // The mask value of a vertex at p for a frame centered at `center`, or -1
+  // without a mask.
+  float stampValue(const Vec3& p, const Vec3& center, const StampFrame& frame) const;
   // The part of falloff `f` that vertex v still gets in this stroke: the
   // growth of max(direct, mirrored) coverage. `mirrorSide`: the contribution
   // comes from the other half of the model.
@@ -104,6 +124,12 @@ class Stroke {
   float reduceMin_ = 1e5f;
 
   bool dabMirrored_ = false;  // current dab was mapped from the mirrored half
+
+  bool stampOn_ = false;    // the current dab uses the brush mask
+  StampFrame stampFrame_;   // for the stored half
+  Vec3 stampDirection_, lastPointed_;
+  bool hasLastPointed_ = false;
+  std::mt19937 random_{12345};
   std::vector<float> coverDirect_, coverMirror_;  // per vertex, this stroke
 
   // Work region: the vertices within regionRadius_ of regionCenter_ (and of

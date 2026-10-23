@@ -133,6 +133,9 @@ void beginStroke(int mx, int my, bool invert, bool smoothing) {
   // Mask paints toward weight 0 by default (negative strength).
   if (s.tool == Tool::Mask) s.strength = -std::fabs(s.strength);
   if (invert) s.strength = -s.strength;
+  s.stamp = sculptMaskActive() ? &app.sculptStamp : nullptr;
+  s.stampMode = app.stampMode;
+  s.stampAngle = app.stampAngle * kPi / 180;
   app.stroke = std::make_unique<Stroke>(app.mesh, s, in);
   app.modified = true;
 }

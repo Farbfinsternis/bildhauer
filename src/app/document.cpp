@@ -306,7 +306,7 @@ bool loadStampImage(const std::string& path, bool mask) {
   if (mask) {
     app.maskImage = grayStamp(stamp);
     app.maskPath = path;
-    app.maskOn = true;
+    (app.paintMode ? app.maskOn : app.sculptMaskOn) = true;
   } else {
     app.textureImage = std::move(stamp);
     app.texturePath = path;
@@ -319,12 +319,15 @@ bool loadStampImage(const std::string& path, bool mask) {
 void rebuildStamps() {
   const bool mask = app.maskOn && !app.maskImage.empty(), texture = app.textureOn && !app.textureImage.empty();
   app.stamps = buildStamps(texture ? &app.textureImage : nullptr, mask ? &app.maskImage : nullptr, app.maskInvert);
+  app.sculptStamp = app.maskImage.empty() ? Stamp{} : buildStamps(nullptr, &app.maskImage, app.maskInvert).color;
   ++app.stampsVersion;
 }
 
 bool stampsActive() {
   return (app.maskOn && !app.maskImage.empty()) || (app.textureOn && !app.textureImage.empty());
 }
+
+bool sculptMaskActive() { return app.sculptMaskOn && !app.sculptStamp.empty(); }
 
 std::string nextBuiltinMatcap(const std::string& current) {
   const std::vector<std::string>& names = builtinMatcaps();

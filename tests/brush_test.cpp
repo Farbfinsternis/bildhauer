@@ -3,7 +3,8 @@
 // After every tool: validity, unchanged topology, exact plane, plus a
 // tool-specific effect (Draw/Inflate raise the surface along the normals,
 // inverted Draw lowers it, Mask lowers weights, Reduce removes triangles,
-// Grab moves the anchor area, Scale enlarges it).
+// Grab moves the anchor area, Scale enlarges it). The brush mask on flat
+// patches.
 //
 // Usage: brush_test <file.sc1>...
 
@@ -146,6 +147,124 @@ void testSymmetricStroke() {
   }
 }
 
+// A flat patch in z = 0, x from x0 to 1, y from -1 to 1; optionally with
+// ripples (for Smooth and Flatten) and as the stored half of a symmetric model.
+Mesh patch(float x0, bool symmetric, bool ripples) {
+  Mesh m;
+  const int nx = int(std::lround((1 - x0) * 40)), ny = 80;
+  for (int j = 0; j <= ny; ++j)
+    for (int i = 0; i <= nx; ++i) {
+      const float x = x0 + (1 - x0) * i / nx, y = -1 + 2.0f * j / ny;
+      m.addVertex({x, y, ripples ? 0.02f * std::sin(40 * x) * std::sin(40 * y) : 0.0f});
+    }
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i) {
+      int a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+      m.addTriangle(a, b, d);
+      m.addTriangle(a, d, c);
+    }
+  m.symmetric = symmetric;
+  for (int v = 0; v < m.vertexSlots(); ++v) m.vertex(v).onSymmetryPlane = symmetric && m.vertex(v).pos.x == 0;
+  m.updateGeometry();
+  m.storeReference();
+  return m;
+}
+
+// One dab at c, seen from +z (screen right +x, up +y).
+void dabAt(Mesh& m, const BrushSettings& s, const Vec3& c) {
+  StrokeInput in;
+  in.point = c;
+  in.viewDir = {0, 0, -1};
+  in.camRight = {1, 0, 0};
+  in.camUp = {0, 1, 0};
+  Stroke stroke(m, s, in);
+}
+
+// The brush mask (brushes.md 3.4) on a flat patch.
+void testBrushMask() {
+  std::printf("brush mask\n");
+  const Stamp white{1, 1, {0xFFFFFFFFu}}, clear{1, 1, {0x00FFFFFFu}};
+  Stamp leftHalf{8, 1, {}};  // opaque for u < 0.5: left on screen at angle 0
+  for (int x = 0; x < 8; ++x) leftHalf.rgba.push_back(x < 4 ? 0xFFFFFFFFu : 0x00FFFFFFu);
+  BrushSettings s;
+  s.tool = Tool::Draw;
+  s.radius = 0.5f;
+  s.detailSize = 2;  // no tessellation: vertices stay where the checks look
+  s.strength = brushStrength(1);
+
+  // A white mask replaces smooth(1 - 1.2 d/r) by 1 (Draw's first dab: z = r f k).
+  Mesh plain = patch(-1, false, false), full = patch(-1, false, false);
+  dabAt(plain, s, {0, 0, 0});
+  s.stamp = &white;
+  dabAt(full, s, {0, 0, 0});
+  int ratioOk = 0, ratioBad = 0, beyond = 0;
+  for (int v = 0; v < plain.vertexSlots(); ++v) {
+    const Vec3 p = plain.vertex(v).refPos;
+    const float d = length(p), zPlain = plain.vertex(v).pos.z, zMask = full.vertex(v).pos.z;
+    if (d >= s.radius / 1.2f) {
+      beyond += zMask != 0;
+      continue;
+    }
+    if (std::fabs(p.x) > 0.6f * s.radius || std::fabs(p.y) > 0.6f * s.radius || zPlain < 1e-5f) continue;
+    const float expect = 1 / smoothFalloff(1 - 1.2f * d / s.radius);
+    (std::fabs(zMask / zPlain - expect) < 1e-3f * expect ? ratioOk : ratioBad)++;
+  }
+  check(ratioOk > 20 && ratioBad == 0, "brush mask: replaces the falloff (" + std::to_string(ratioOk) + " vertices, " +
+                                           std::to_string(ratioBad) + " off)");
+  check(beyond == 0, "brush mask: nothing moves beyond the brush's reach");
+
+  // Half mask: only the left half rises; turned by 90 degrees, the lower half.
+  auto raised = [](const Mesh& m, auto&& where) {
+    int n = 0;
+    for (int v = 0; v < m.vertexSlots(); ++v)
+      if (where(m.vertex(v).refPos) && m.vertex(v).pos.z > 1e-6f) ++n;
+    return n;
+  };
+  s.stamp = &leftHalf;
+  Mesh half = patch(-1, false, false);
+  dabAt(half, s, {0, 0, 0});
+  const int left = raised(half, [](const Vec3& p) { return p.x < -0.1f; });
+  const int right = raised(half, [](const Vec3& p) { return p.x > 0.1f; });
+  check(left > 20 && right == 0, "brush mask: a half mask raises one side (" + std::to_string(left) + " / " +
+                                     std::to_string(right) + ")");
+  s.stampAngle = 3.14159265f / 2;
+  Mesh turned = patch(-1, false, false);
+  dabAt(turned, s, {0, 0, 0});
+  const int below = raised(turned, [](const Vec3& p) { return p.y < -0.1f; });
+  const int above = raised(turned, [](const Vec3& p) { return p.y > 0.1f; });
+  check(below > 20 && above == 0, "brush mask: the angle turns it (" + std::to_string(below) + " / " +
+                                      std::to_string(above) + ")");
+  s.stampAngle = 0;
+
+  // Symmetry: a dab on the mirrored half at x = -0.5 is mirrored with its
+  // stamp, so the screen-left side (x < -0.5) lands at x > 0.5.
+  Mesh sym = patch(0, true, false);
+  dabAt(sym, s, {-0.5f, 0, 0});
+  const int outer = raised(sym, [](const Vec3& p) { return p.x > 0.6f; });
+  const int inner = raised(sym, [](const Vec3& p) { return p.x < 0.4f; });
+  check(outer > 20 && inner == 0, "brush mask: mirrored with the dab (" + std::to_string(outer) + " / " +
+                                      std::to_string(inner) + ")");
+
+  // Smooth and Flatten read it too; Inflate does not.
+  for (Tool tool : {Tool::Smooth, Tool::Flatten, Tool::Inflate}) {
+    s.tool = tool;
+    s.strength = 1;
+    const Mesh start = patch(-1, false, true);
+    auto movedBy = [&](const Stamp* st) {
+      Mesh m = start;
+      s.stamp = st;
+      dabAt(m, s, {0, 0, 0});
+      float most = 0;
+      for (int v = 0; v < m.vertexSlots(); ++v) most = std::fmax(most, length(m.vertex(v).pos - start.vertex(v).pos));
+      return most;
+    };
+    const float withClear = movedBy(&clear), withWhite = movedBy(&white);
+    const std::string name = toolName(tool);
+    if (tool == Tool::Inflate) check(withClear > 0, name + ": ignores the brush mask");
+    else check(withClear == 0 && withWhite > 0, name + ": a clear mask stops it, a white one does not");
+  }
+}
+
 float surfaceDistance(const Mesh& m, const Camera& cam, const Vec3& target) {
   PickHit h = pick(m, cam.eye, normalize(target - cam.eye));
   return h.hit ? h.t : -1;
@@ -262,6 +381,7 @@ int main(int argc, char** argv) {
   }
   testParams();
   testSymmetricStroke();
+  testBrushMask();
   for (int i = 1; i < argc; ++i) testFile(argv[i]);
   std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");
   return failures ? 1 : 0;

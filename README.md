@@ -97,7 +97,10 @@ pressing a tool key again toggles its option (Clay, Lock plane, Global).
 Ctrl+D subdivide, Ctrl+Y reduce all, Ctrl+P paint mode (asks first: it is one
 way, as in Sculptris). Symmetry is switched in the panel or the Edit menu:
 off mirrors the stored half into a full mesh, on keeps the +x side and drops
-what differs on the -x side (both undoable).
+what differs on the -x side (both undoable). The Brush mask section loads a
+grayscale image (the same as in paint mode); Draw, Smooth and Flatten then
+work only where it is bright, the stamp lying on the surface under the brush
+(Fixed with Angle, Directional or Random as in paint mode).
 
 Paint mode (files with paint data open in it): D Paint color, B Paint bump,
 F Flatten bump; with Shift `[` `]` change the hardness; N shows the bump
@@ -123,7 +126,7 @@ exist.
 `--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]
 [--brush-mask image] [--brush-texture image] [--heightmask] [--cavity]`
 renders one frame (after a few demo strokes, in paint mode with paint strokes
-and a gold layer; --save saves as `<name>_bildhauer.sc1` first) and exits.
+and a gold layer; --brush-mask also shapes the sculpt strokes; --save saves as `<name>_bildhauer.sc1` first) and exits.
 
 The test data is not part of the repository. By default the tests use the
 `.sc1` files from `BILDHAUER_SCULPTRIS_DIR` (`data/`, `models/`) and
@@ -154,7 +157,7 @@ an MCP server. Without a native engine it only covers engine-free PE checks
 | Reduction (collapsing edges), beautify | documented | `CollapseEdge` 0x40E5F0, `ReduceMesh` 0x4105F0 |
 | Subdivision (triangles and quads, smooth/flat) | documented | `SubdivideMesh` 0x40F8C0 |
 | Symmetry (half mesh, on/off, seam) | documented; brush picking on the mirror side open | `SetSymmetry` 0x412170, `Symmetry_SnapPlaneVertices` 0x411FF0 |
-| Brushes (all 11 tools) | documented, incl. slider mapping and dab path; Rotate/Scale symmetry details open | `Brush_Dispatch` 0x41A740 |
+| Brushes (all 11 tools) | documented, incl. slider mapping, dab path and brush mask; Rotate/Scale symmetry details open | `Brush_Dispatch` 0x41A740 |
 | Picking (depth buffer in sculpt mode, ray cast + tree in paint mode) | documented; tree maintenance open | `PickDepth` 0x409200, `PickSurface` 0x408DB0 |
 | Paint mode: painting (color, bump, flatten), bump normals | documented, incl. Fill/Clear, stamps and heightmask | `PaintDab` 0x426B90, `PaintTexels` 0x4257A0 |
 | Paint mode: UV atlas | pipeline outlined only; bildhauer uses its own unwrapping (decision 2026-10-18) | `BuildTextureMapping` 0x4275A0 |
@@ -169,6 +172,7 @@ Implementation:
 | `.sc1` read/write, mesh loading, mirroring | done (`src/io`); v8 round trip byte-identical, v0 upgrades to v8 |
 | Edge split, brush tessellation, collapse, reduction, beautify, subdivision (incl. quads) | done (`src/core`); topology kept on all samples and a quad cube |
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
+| Sculpt brush mask (Draw, Smooth, Flatten) | done (`src/core/brush`, Sculpt panel); after brushes.md 3.4 |
 | Viewer: matcap rendering, mirrored half, sculpting, undo, open/save | done (`src/app`) |
 | UI: menus, tool panel (sculpt and paint), colors, material layers, status bar | done (`src/app/ui`, Dear ImGui), first version |
 | Symmetry switching with plane-valence reduction | done (`src/core/symmetry`); on and off on all samples, quads kept; Sculpt panel and Edit menu |

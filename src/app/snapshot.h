@@ -14,7 +14,7 @@ struct SnapshotOptions {
   bool paint = false; // enter paint mode first
   bool save = false;  // save as <name>_bildhauer.sc1 before rendering
   bool ui = true;     // draw the UI into the snapshot
-  std::string brushMask, brushTexture;  // stamp images for the paint strokes
+  std::string brushMask, brushTexture;  // stamp images (the mask also shapes sculpt strokes)
   int frames = 0;     // > 0: write the mean frame time to <path>.txt
 };
 

@@ -82,6 +82,10 @@ struct App {
   float stampAngle = 0;  // degrees
   Stamps stamps;
   int stampsVersion = 0;
+  // Sculpt mode reads the brush mask alone (brushes.md 3.4), with its own
+  // switch; image, Invert and how the stamp turns are shared with paint mode.
+  bool sculptMaskOn = false;
+  Stamp sculptStamp;
   bool uploadAll = false;  // the canvas is new: upload whole textures
   GLuint colorTex = 0, normalTex = 0;
   struct SlotTextures {

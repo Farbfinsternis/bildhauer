@@ -55,6 +55,8 @@ bool loadStampImage(const std::string& path, bool mask);
 void rebuildStamps();
 // Whether strokes use a stamp: an enabled mask or texture that is loaded.
 bool stampsActive();
+// Whether sculpt strokes use the brush mask: switched on and loaded.
+bool sculptMaskActive();
 
 // A new material layer with the next built-in matcap; it becomes what Paint
 // color paints. Returns its slot or -1 when all are in use.

@@ -45,6 +45,7 @@ Stroke::Stroke(Mesh& mesh, const BrushSettings& settings, const StrokeInput& sta
     : mesh_(mesh), s_(settings), start_(start), path_(start.point),
       anchor_(start.point) {
   if (mesh_.symmetric && anchor_.x < 0) anchor_.x = -anchor_.x;
+  stampDirection_ = -start.camUp;
   mesh_.storeReference();
   if (s_.detailFactor >= 0.1f || s_.tool == Tool::Reduce) mesh_.clearQuads();
   if (s_.tool == Tool::Grab || s_.tool == Tool::Rotate || s_.tool == Tool::Scale) dab(anchor_, start);
@@ -133,7 +134,54 @@ void Stroke::inheritCoverage(const std::vector<int>& created) {
   }
 }
 
+void Stroke::updateStampFrame(const Vec3& c, const Vec3& pointed, const StrokeInput& in) {
+  const float r = s_.radius;
+  Vec3 sumN;
+  for (int v : region_) {
+    const Vertex& vx = mesh_.vertex(v);
+    if (!usable(vx)) continue;
+    const float d = length(vx.pos - c);
+    if (d < r) sumN += vx.normal * (1 - d / r);
+  }
+  // Built where the dab lies on screen, then mapped onto the stored half.
+  Vec3 n = length(sumN) > 0 ? normalize(sumN) : -in.viewDir;
+  if (dabMirrored_ && length(sumN) > 0) n = mirrorX(n);
+  StampFrame f;
+  switch (s_.stampMode) {
+    case StampMode::Fixed:
+      f = fixedStampFrame(n, in.camRight, in.camUp, s_.stampAngle);
+      break;
+    case StampMode::Directional:
+      if (hasLastPointed_ && length(pointed - lastPointed_) > 1e-4f)
+        stampDirection_ += ((pointed - lastPointed_) - stampDirection_) * 0.3f;
+      f = directedStampFrame(n, stampDirection_);
+      break;
+    case StampMode::Random: {
+      std::uniform_real_distribution<float> u(-0.5f, 0.5f);
+      f = directedStampFrame(n, {u(random_), u(random_), u(random_)});
+      break;
+    }
+  }
+  lastPointed_ = pointed;
+  hasLastPointed_ = true;
+  if (dabMirrored_) f = {mirrorX(f.a), mirrorX(f.b), mirrorX(f.n)};
+  stampFrame_ = f;
+}
+
+float Stroke::stampValue(const Vec3& p, const Vec3& center, const StampFrame& f) const {
+  if (!stampOn_) return -1;
+  const float size = 2 * s_.radius;
+  Vec3 e = p - center;
+  const float d = dot(e, f.n);
+  e -= f.n * d;
+  const float u = dot(e, f.a) / (0.6f * size) + 0.5f, v = dot(e, f.b) / (0.6f * size) + 0.5f;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+  const float depth = std::clamp(2 * (1 - std::fabs(d) / size), 0.0f, 1.0f);
+  return float(s_.stamp->sample(u, v) >> 24) / 255 * depth;
+}
+
 void Stroke::dab(Vec3 c, const StrokeInput& in) {
+  const Vec3 pointed = c;
   dabMirrored_ = mesh_.symmetric && c.x < 0;
   if (dabMirrored_) c.x = -c.x;
   ++dabs_;
@@ -157,6 +205,8 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
       if (!inRegion_[v]) { inRegion_[v] = 1; region_.push_back(v); }
   }
   times_.tessellate += msSince(clock);
+  stampOn_ = s_.stamp && !s_.stamp->empty() && (tool == Tool::Draw || tool == Tool::Smooth || tool == Tool::Flatten);
+  if (stampOn_) updateStampFrame(c, pointed, in);
   auto mirrorFor = [&](float r) { return mesh_.symmetric && c.x < r; };
   switch (tool) {
     case Tool::Draw: draw(c, mirrorFor(s_.radius)); break;
@@ -217,23 +267,27 @@ void Stroke::draw(const Vec3& c, bool mirror) {
     if (a > 0) h *= 1.5f;
   }
   const float sign = s >= 0 ? 1.0f : -1.0f;
+  const StampFrame& frame = stampFrame_;
+  const StampFrame frameM{mirrorX(frame.a), mirrorX(frame.b), mirrorX(frame.n)};
 
   for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
     const Vec3 p = vx.pos;
-    // Falloff times the step toward the raised plane; 0 if out of reach or
-    // the step would go against the stroke direction.
-    auto contribution = [&](const Vec3& center, const Vec3& n, const Vec3& origin, float kfall, Vec3& delta) {
+    // Falloff (or the brush mask) times the step toward the raised plane; 0
+    // if out of reach or the step would go against the stroke direction.
+    auto contribution = [&](const Vec3& center, const Vec3& n, const Vec3& origin, float kfall,
+                            const StampFrame& fr, Vec3& delta) {
       float t = 1 - kfall * length(p - center) / r;
       if (t <= 0) return 0.0f;
       delta = projectOnPlane(p, origin, n) + n * (sign * h) - p;
       if (dot(vx.normal, delta) * s <= 0) return 0.0f;
-      return smoothFalloff(t) * weight(v);
+      const float m = stampValue(p, center, fr);
+      return (m >= 0 ? m : smoothFalloff(t)) * weight(v);
     };
     Vec3 d1, d2;
-    float f1 = covered(v, contribution(c, N, R, 1.2f, d1), dabMirrored_);
-    float f2 = mirror ? covered(v, contribution(cm, mirrorX(N), mirrorX(R), 1.3f, d2), !dabMirrored_) : 0.0f;
+    float f1 = covered(v, contribution(c, N, R, 1.2f, frame, d1), dabMirrored_);
+    float f2 = mirror ? covered(v, contribution(cm, mirrorX(N), mirrorX(R), 1.3f, frameM, d2), !dabMirrored_) : 0.0f;
     if (f1 <= 0 && f2 <= 0) continue;
     vx.pos += (d1 * f1 + d2 * f2) * k;
     touched(mesh_, v);
@@ -247,6 +301,8 @@ void Stroke::smooth(const Vec3& c) {
       Vertex& vx = mesh_.vertex(v);
       if (!usable(vx)) continue;
       float t = 1 - 1.3f * length(vx.pos - c) / r;
+      if (t <= 0) continue;
+      if (const float m = stampValue(vx.pos, c, stampFrame_); m >= 0) t = m;
       if (t <= 0) continue;
       bool boundary = !vx.onSymmetryPlane && isBoundaryVertex(mesh_, v);
       Vec3 sum;
@@ -402,7 +458,9 @@ void Stroke::flatten(const Vec3& c, bool mirror, const Vec3& viewDir) {
     if (!usable(vx)) continue;
     float t = 1 - 1.3f * length(vx.pos - c) / r;
     if (t <= 0) continue;
+    if (const float m = stampValue(vx.pos, c, stampFrame_); m >= 0) t = m;
     float f = smoothFalloff(t);
+    if (f <= 0) continue;
     float height = dot(vx.pos - planeP_, planeN_);
     if (s_.lockPlane) {
       float g = (1 - std::fabs(height) / r) * 1.2f;

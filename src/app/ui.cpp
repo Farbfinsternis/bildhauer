@@ -97,6 +97,8 @@ void menuBar() {
   ImGui::EndMainMenuBar();
 }
 
+void sculptMaskPanel();
+
 void sculptPanel(float width) {
   ImGui::SeparatorText("Brush");
   const float column = (width - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
@@ -137,6 +139,7 @@ void sculptPanel(float width) {
     default: break;
   }
   ImGui::TextDisabled("Ctrl inverts, Shift smooths");
+  sculptMaskPanel();
 
   ImGui::SeparatorText("Mesh");
   ImGui::Checkbox("Beautify while sculpting", &app.beautify);
@@ -149,16 +152,14 @@ void sculptPanel(float width) {
   if (ImGui::Button("Enter paint mode...", ImVec2(-1, 0))) askEnterPaintMode();
 }
 
-// The stamp the current tool samples, as a texture for the preview.
-GLuint stampPreview(float& aspect) {
+// A stamp as a texture for the preview; `which` tells the stamps apart
+// (0 color, 1 bump, 2 sculpt mask).
+GLuint stampPreview(const Stamp& s, int which, float& aspect) {
   static GLuint tex = 0;
-  static int version = -1;
-  static PaintTool tool = PaintTool::Color;
-  const PaintTool now = app.paint.tool == PaintTool::Color ? PaintTool::Color : PaintTool::Bump;
-  const Stamp& s = now == PaintTool::Color ? app.stamps.color : app.stamps.bump;
+  static int version = -1, shown = -1;
   if (s.empty()) return 0;
   aspect = float(s.height) / float(s.width);
-  if (tex && version == app.stampsVersion && tool == now) return tex;
+  if (tex && version == app.stampsVersion && shown == which) return tex;
   if (!tex) glGenTextures(1, &tex);
   glBindTexture(GL_TEXTURE_2D, tex);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -166,8 +167,46 @@ GLuint stampPreview(float& aspect) {
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s.width, s.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, s.rgba.data());
   version = app.stampsVersion;
-  tool = now;
+  shown = which;
   return tex;
+}
+
+// Fixed / Directional / Random and the angle, shared by both modes.
+void stampModeControls() {
+  int mode = int(app.stampMode);
+  ImGui::RadioButton("Fixed", &mode, int(StampMode::Fixed));
+  ImGui::SameLine();
+  ImGui::RadioButton("Directional", &mode, int(StampMode::Directional));
+  ImGui::SameLine();
+  ImGui::RadioButton("Random", &mode, int(StampMode::Random));
+  app.stampMode = StampMode(mode);
+  if (app.stampMode == StampMode::Fixed) ImGui::SliderFloat("Angle", &app.stampAngle, -180, 180, "%.0f\xC2\xB0");
+}
+
+// Brush mask in sculpt mode (brushes.md 3.4): the mask image alone, read by
+// Draw, Smooth and Flatten.
+void sculptMaskPanel() {
+  ImGui::SeparatorText("Brush mask");
+  if (ImGui::Checkbox("Brush mask", &app.sculptMaskOn) && app.sculptMaskOn && app.maskImage.empty() &&
+      !chooseStampImage(true))
+    app.sculptMaskOn = false;
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Draw, Smooth and Flatten work where the image is bright");
+  ImGui::SameLine();
+  const std::string name = app.maskPath.empty() ? std::string("Image...") : fileName(app.maskPath);
+  if (ImGui::Button(name.c_str(), ImVec2(-1, 0))) chooseStampImage(true);
+  if (!app.maskPath.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("%s", app.maskPath.c_str());
+  if (!app.sculptMaskOn) return;
+  if (ImGui::Checkbox("Invert mask", &app.maskInvert)) rebuildStamps();
+  stampModeControls();
+  float aspect = 1;
+  if (GLuint tex = stampPreview(app.sculptStamp, 2, aspect)) {
+    const float side = ImGui::GetFrameHeight() * 4;
+    ImGui::Image(ImTextureRef(ImTextureID(intptr_t(tex))), ImVec2(side, side * aspect));
+  }
+  const Tool t = app.brush.tool;
+  if (t != Tool::Draw && t != Tool::Smooth && t != Tool::Flatten) ImGui::TextDisabled("%s ignores the mask", toolName(t));
 }
 
 // Heightmask (paint.md 3.3): Paint color only reaches the high (or, with
@@ -215,14 +254,7 @@ void stampPanel() {
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
     ImGui::SetTooltip("Paint color paints the texture's colors, the bump tools its brightness");
 
-  int mode = int(app.stampMode);
-  ImGui::RadioButton("Fixed", &mode, int(StampMode::Fixed));
-  ImGui::SameLine();
-  ImGui::RadioButton("Directional", &mode, int(StampMode::Directional));
-  ImGui::SameLine();
-  ImGui::RadioButton("Random", &mode, int(StampMode::Random));
-  app.stampMode = StampMode(mode);
-  if (app.stampMode == StampMode::Fixed) ImGui::SliderFloat("Angle", &app.stampAngle, -180, 180, "%.0f\xC2\xB0");
+  stampModeControls();
   if (changed) rebuildStamps();
 
   if (!stampsActive()) {
@@ -230,7 +262,8 @@ void stampPanel() {
     return;
   }
   float aspect = 1;
-  if (GLuint tex = stampPreview(aspect)) {
+  const bool color = app.paint.tool == PaintTool::Color;
+  if (GLuint tex = stampPreview(color ? app.stamps.color : app.stamps.bump, color ? 0 : 1, aspect)) {
     const float side = ImGui::GetFrameHeight() * 4;
     ImGui::Image(ImTextureRef(ImTextureID(intptr_t(tex))), ImVec2(side, side * aspect));
     ImGui::SameLine();
