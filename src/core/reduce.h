@@ -8,7 +8,8 @@ namespace bh {
 
 // Collapses edge v1-v2 into v1 at the curved midpoint. Rejected if v1 and v2
 // share a neighbor other than the vertices opposite the edge, if their
-// symmetry-plane flags differ, or if valence(v1) + valence(v2) - 4 > 18.
+// symmetry-plane flags differ, if valence(v1) + valence(v2) - 4 > 18, or
+// (not from the docs) if it would turn a remaining triangle over.
 // Returns the surviving vertex, or -1.
 int collapseEdge(Mesh& mesh, int e);
 

@@ -62,6 +62,24 @@ inline Topology fullTopology(const Mesh& m, bool symmetric) {
   return topo;
 }
 
+// Edges whose two triangles run along them in the same direction: one of the
+// two is turned against the other, and backface culling hides it.
+inline int misorientedEdges(const Mesh& m) {
+  int n = 0;
+  for (int e = 0; e < m.edgeSlots(); ++e) {
+    const Edge& edge = m.edge(e);
+    if (!edge.active || edge.numTris() != 2) continue;
+    auto forward = [&](int t) {
+      const Triangle& tri = m.triangle(t);
+      for (int k = 0; k < 3; ++k)
+        if (tri.v[k] == edge.v[0] && tri.v[(k + 1) % 3] == edge.v[1]) return true;
+      return false;
+    };
+    n += forward(edge.tri[0]) == forward(edge.tri[1]);
+  }
+  return n;
+}
+
 inline bool planeIsExact(const Mesh& m) {
   for (int v = 0; v < m.vertexSlots(); ++v) {
     const Vertex& vx = m.vertex(v);
@@ -85,6 +103,9 @@ inline void checkMesh(const Mesh& m, bool symmetric, const Topology& before, con
   check(after.overfull == 0 && after.euler() == before.euler() && (after.open == 0) == (before.open == 0),
         std::string(op) + ": topology kept (euler " + std::to_string(after.euler()) + ", " +
             std::to_string(after.open) + " open edges)");
+  const int misoriented = misorientedEdges(m);
+  check(misoriented == 0, std::string(op) + ": consistent orientation (" + std::to_string(misoriented) +
+                              " misoriented edges)");
   check(finite(m), std::string(op) + ": finite positions");
   if (symmetric) check(planeIsExact(m), std::string(op) + ": symmetry plane exact");
 }

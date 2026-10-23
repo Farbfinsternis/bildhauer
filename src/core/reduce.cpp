@@ -20,6 +20,28 @@ bool isOpposite(const Mesh& mesh, const Edge& edge, int v) {
   return false;
 }
 
+// Whether moving v1 and v2 to `mid` turns a remaining triangle of either
+// over. Triangles without area keep no direction and do not count.
+bool wouldFlip(const Mesh& mesh, const Edge& edge, const Vec3& mid) {
+  for (int v : edge.v) {
+    const Vertex& vx = mesh.vertex(v);
+    for (int i = 0; i < vx.numTris; ++i) {
+      const int t = vx.tris[i];
+      if (t == edge.tri[0] || t == edge.tri[1]) continue;
+      Vec3 p[3], q[3];
+      for (int k = 0; k < 3; ++k) {
+        const int x = mesh.triangle(t).v[k];
+        p[k] = mesh.vertex(x).pos;
+        q[k] = x == edge.v[0] || x == edge.v[1] ? mid : p[k];
+      }
+      const Vec3 before = cross(p[1] - p[0], p[2] - p[0]);
+      if (dot(before, before) < 1e-24f) continue;
+      if (dot(before, cross(q[1] - q[0], q[2] - q[0])) <= 0) return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 int collapseEdge(Mesh& mesh, int e) {
@@ -41,19 +63,28 @@ int collapseEdge(Mesh& mesh, int e) {
   // Addition (not from the docs): an interior edge between two boundary
   // vertices would pinch the surface into a non-manifold point.
   if (edge.numTris() == 2 && isBoundaryVertex(mesh, v1) && isBoundaryVertex(mesh, v2)) return -1;
+  // Addition: a triangle with three open edges is the last of its piece of
+  // surface; collapsing it would make that piece vanish.
+  if (edge.numTris() == 1) {
+    int open = 0;
+    for (int k : mesh.triangle(edge.tri[0] >= 0 ? edge.tri[0] : edge.tri[1]).e) open += mesh.edge(k).numTris() == 1;
+    if (open == 3) return -1;
+  }
 
   Vec3 mid = curvedMidpoint(a.pos, a.normal, b.pos, b.normal);
+  // Addition (not from the docs): a collapse must not fold the surface.
+  if (wouldFlip(mesh, edge, mid)) return -1;
 
   for (int t : edge.tri)
     if (t >= 0) mesh.removeTriangle(t, false);
 
   // Rebuild every remaining triangle of v2 with v1 in its place.
-  struct Rebuild { std::array<int, 3> v; Vec3 normal; bool fileFlag; };
+  struct Rebuild { std::array<int, 3> v; bool fileFlag; };
   std::vector<Rebuild> rebuild;
   const Vertex& vb = mesh.vertex(v2);
   for (int i = 0; i < vb.numTris; ++i) {
     const Triangle& t = mesh.triangle(vb.tris[i]);
-    Rebuild r{t.v, t.normal, t.fileFlag};
+    Rebuild r{t.v, t.fileFlag};
     for (int& x : r.v)
       if (x == v2) x = v1;
     rebuild.push_back(r);
@@ -62,8 +93,11 @@ int collapseEdge(Mesh& mesh, int e) {
   mesh.removeIsolatedVertex(v2);
 
   mesh.vertex(v1).pos = mid;
+  // The vertex order already carries the orientation; an orientation check
+  // against the old normal (Sculptris) would turn a folded triangle against
+  // its neighbors.
   for (const Rebuild& r : rebuild) {
-    int t = mesh.addTriangle(r.v[0], r.v[1], r.v[2], &r.normal);
+    int t = mesh.addTriangle(r.v[0], r.v[1], r.v[2]);
     if (t >= 0) mesh.triangle(t).fileFlag = r.fileFlag;
   }
 

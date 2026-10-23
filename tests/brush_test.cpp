@@ -3,7 +3,8 @@
 // After every tool: validity, unchanged topology, exact plane, plus a
 // tool-specific effect (Draw/Inflate raise the surface along the normals,
 // inverted Draw lowers it, Mask lowers weights, Reduce removes triangles,
-// Grab moves the anchor area, Scale enlarges it). The brush mask on flat
+// Grab moves the anchor area, Scale enlarges it); Reduce all as loaded and
+// after strong Flatten keeps the mesh closed and oriented. The brush mask on flat
 // patches.
 //
 // Usage: brush_test <file.sc1>...
@@ -15,6 +16,7 @@
 #include "core/brush.h"
 #include "core/brush_params.h"
 #include "core/pick.h"
+#include "core/reduce.h"
 #include "core/relax.h"
 #include "io/sc1.h"
 #include "test_util.h"
@@ -391,6 +393,36 @@ void testFile(const std::string& path) {
         default: break;
       }
     }
+  }
+
+  // Reduce all, on the model as loaded and after strong Flatten strokes:
+  // collapses once turned triangles against their neighbors (seen as holes)
+  // and could make an open surface vanish.
+  {
+    Mesh m = base;
+    for (int i = 0; i < 4; ++i) reduceMesh(m);
+    checkMesh(m, sym, before, "Reduce all 4 times");
+  }
+  for (bool lock : {false, true}) {
+    Mesh m = base;
+    BrushSettings s;
+    s.tool = Tool::Flatten;
+    s.lockPlane = lock;
+    s.radius = 0.12f * size;
+    s.detailSize = 0.04f * size;
+    s.strength = brushStrength(1);
+    const std::string name = std::string("strong Flatten") + (lock ? " (lock plane)" : "");
+    for (int pass = 0; pass < 6; ++pass) {
+      Stroke stroke(m, s, inputAt(m, cam, mid, 400, 300, nullptr));
+      for (int i = 1; i <= 12; ++i) {
+        const float side = pass % 2 ? -1.0f : 1.0f;
+        Vec3 target = mid + cam.up * (0.01f * size * i * side) + cam.right * (0.004f * size * (i % 3));
+        stroke.moveTo(inputAt(m, cam, target, 400, 300 - 12.0f * i * side, nullptr));
+      }
+    }
+    checkMesh(m, sym, before, name.c_str());
+    for (int i = 0; i < 10; ++i) reduceMesh(m);
+    checkMesh(m, sym, before, (name + ", then Reduce all 10 times").c_str());
   }
 }
 

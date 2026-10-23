@@ -245,6 +245,14 @@ Execution:
    Vertices on the symmetry plane get x = 0.
 6. v1: relax level = 10, mark the neighborhood dirty.
 
+Note for the implementation: the orientation check of step 3 compares the
+rebuilt triangle with its old normal. Where moving v1 folds a triangle over
+(after strong Flatten strokes, for example), it reverses that triangle's
+vertex order against its neighbors, and backface culling then shows a hole.
+bildhauer keeps the vertex order from the substitution instead, rejects
+collapses that would fold a remaining triangle of v1 or v2, and never
+collapses the last triangle of a piece of surface (three open edges).
+
 ### 4.2 Reducing an area (`ReduceMesh`, 0x4105F0; "REDUCE SELECTED", "REDUCE BRUSH") **[sure]**
 
 Works on the vertices of the work set whose weight ≠ 0 (not masked). Requires
