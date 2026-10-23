@@ -13,6 +13,7 @@ struct SnapshotOptions {
   bool symmetryOff = false;  // turn symmetry off first
   bool paint = false; // enter paint mode first
   bool save = false;  // save as <name>_bildhauer.sc1 before rendering
+  std::string exportObj;  // write the mesh as OBJ (File > Export OBJ) before rendering
   bool ui = true;     // draw the UI into the snapshot
   std::string brushMask, brushTexture;  // stamp images (the mask also shapes sculpt strokes)
   int frames = 0;     // > 0: write the mean frame time to <path>.txt

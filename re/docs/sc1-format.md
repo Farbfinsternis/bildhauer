@@ -59,8 +59,8 @@ triangle[numTris]:
 
 extVersion    i32      8
 if extVersion >= 3:
-  extraA      f32      global 0x4B0A20 (samples: 0.01 or 1.0; meaning open)
-  extraVec    f32[3]   global 0x4FD3A0 (samples: 0,0,0; meaning open)
+  extraA      f32      global 0x4B0A20: OBJ export scale s (obj.md 2; new scene 0.01)
+  extraVec    f32[3]   global 0x4FD3A0: OBJ export offset o (obj.md 2; new scene 0)
 if extVersion == 6:
   (u8)                 read and ignored
 if extVersion >= 7:
@@ -166,7 +166,8 @@ Limits from the log strings: at most 24 triangles/edges per vertex
 
 - Meaning of `weight` in the old format (f32; 0.0 in the v0 sample). Taken
   literally it would mask the whole mesh, so the bildhauer loader uses 1.0 for
-  files older than version 6. Also open: `extraA` and `extraVec`.
+  files older than version 6. (`extraA` and `extraVec` are the OBJ export
+  transform, see obj.md 2.)
 - The polygon-list byte values (the reader treats 2 specially). The
   triangle flag is the hidden state (see mesh-core.md 1).
 - Bump scale (answered in paint.md 3.4): heights are relative to the texel

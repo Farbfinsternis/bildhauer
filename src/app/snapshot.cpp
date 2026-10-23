@@ -13,6 +13,7 @@
 #include "app/input.h"
 #include "app/render.h"
 #include "app/ui.h"
+#include "io/obj.h"
 
 namespace bh::viewer {
 
@@ -124,6 +125,15 @@ int runSnapshot(const SnapshotOptions& o) {
     std::string err;
     if (saveModel(defaultSavePath(), &err)) app.modified = false;
     else app.status = "save failed: " + err;
+  }
+  if (!o.exportObj.empty()) {
+    ObjExport options;
+    options.scale = app.file.extraA;
+    options.offset = app.file.extraVec;
+    options.normals = app.exportNormals;
+    if (app.paintMode) options.uvs = &app.texmap;
+    std::string err;
+    if (!writeObj(o.exportObj, app.mesh, options, &err)) app.status = "export failed: " + err;
   }
   if (o.frames > 0) {  // average frame time, written next to the snapshot
     LARGE_INTEGER f, t0, t1;

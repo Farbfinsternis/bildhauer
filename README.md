@@ -27,6 +27,8 @@ down.
   (clay, gold and your own images).
 - **Open and save Sculptris files (.sc1).** Your old Sculptris models open
   in bildhauer, and files saved by bildhauer open in Sculptris.
+- **Export as OBJ** (File > Export OBJ) to keep working on your model in
+  Blender, ZBrush, Maya or any other 3D program.
 
 ## Who it is for
 

@@ -99,6 +99,7 @@ struct App {
   GLuint paintShader = 0;  // 0: no OpenGL 2.0, a stand-in shading is used
 
   bool wireframe = false;
+  bool exportNormals = false;  // "Export vertex normals in OBJ" (off, as in Sculptris)
   int mouseX = 0, mouseY = 0;
   bool orbiting = false, panning = false;
   PickHit hover;

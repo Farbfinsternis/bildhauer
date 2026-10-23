@@ -9,6 +9,7 @@
 namespace bh::viewer {
 
 constexpr const char* kSc1Filter = "Sculptris models (*.sc1)\0*.sc1\0All files\0*.*\0";
+constexpr const char* kObjFilter = "Wavefront OBJ (*.obj)\0*.obj\0All files\0*.*\0";
 constexpr const char* kImageFilter = "Images\0*.png;*.jpg;*.jpeg;*.bmp;*.tif\0All files\0*.*\0";
 
 // The chosen file, or an empty string if the dialog was cancelled.

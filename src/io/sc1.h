@@ -35,8 +35,8 @@ struct Sc1File {
 
   bool hasExtension = false;  // false: file ended after the triangles
   int32_t extVersion = 8;
-  float extraA = 1.0f;  // meaning open
-  Vec3 extraVec;        // meaning open
+  float extraA = 1.0f;  // OBJ export scale (obj.md 2)
+  Vec3 extraVec;        // OBJ export offset
   bool hasPolyList = false;
   std::vector<uint8_t> polyList;  // one byte per triangle; pairs triangles into quads
   uint8_t hasTexturing = 0;

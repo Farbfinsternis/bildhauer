@@ -21,6 +21,7 @@ add_library(bildhauer_core
   src/core/symmetry.cpp
   src/core/tessellate.cpp
   src/core/texmap.cpp
+  src/io/obj.cpp
   src/io/sc1.cpp
 )
 target_include_directories(bildhauer_core PUBLIC src)
@@ -92,6 +93,10 @@ add_test(NAME texmap COMMAND texmap_test ${BILDHAUER_SC1_SAMPLES})
 add_executable(paint_test tests/paint_test.cpp)
 target_link_libraries(paint_test PRIVATE bildhauer_core)
 add_test(NAME paint COMMAND paint_test ${BILDHAUER_SC1_SAMPLES})
+
+add_executable(obj_test tests/obj_test.cpp)
+target_link_libraries(obj_test PRIVATE bildhauer_core)
+add_test(NAME obj COMMAND obj_test ${BILDHAUER_SC1_SAMPLES})
 
 # Not a test: times strokes phase by phase (brush_bench <file.sc1>).
 add_executable(brush_bench tests/brush_bench.cpp)

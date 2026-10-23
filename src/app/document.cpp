@@ -13,6 +13,7 @@
 #include "core/relax.h"
 #include "core/subdivide.h"
 #include "core/symmetry.h"
+#include "io/obj.h"
 
 namespace bh::viewer {
 
@@ -173,6 +174,20 @@ void commandSaveAs() {
   } else {
     app.status = "save failed: " + err;
   }
+}
+
+void commandExportObj() {
+  std::string base = app.savePath.empty() ? defaultSavePath() : app.savePath;
+  if (base.size() > 4 && base.substr(base.size() - 4) == ".sc1") base.resize(base.size() - 4);
+  std::string path = saveFileDialog(app.hwnd, kObjFilter, base + ".obj", "obj");
+  if (path.empty()) return;
+  ObjExport options;
+  options.scale = app.file.extraA;
+  options.offset = app.file.extraVec;
+  options.normals = app.exportNormals;
+  if (app.paintMode) options.uvs = &app.texmap;
+  std::string err;
+  app.status = writeObj(path, app.mesh, options, &err) ? "exported " + fileName(path) : "export failed: " + err;
 }
 
 void commandSave() {

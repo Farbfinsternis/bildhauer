@@ -24,6 +24,8 @@ void commandNew();
 void commandOpen();
 void commandSave();
 void commandSaveAs();
+// Wavefront OBJ as Sculptris writes it (re/docs/obj.md); asks for the file.
+void commandExportObj();
 // Asks whether to save unsaved changes: false if the user cancels.
 bool confirmDiscard();
 

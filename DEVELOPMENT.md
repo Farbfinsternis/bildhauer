@@ -45,7 +45,7 @@ src/                  implementation (C++20, OpenGL)
                       (tessellate), collapse + reduction (reduce), relaxation +
                       beautify (relax), subdivision, symmetry, UV atlas
                       (texmap), painting (paint)
-  io/                 .sc1 reader/writer, mesh loading
+  io/                 .sc1 reader/writer, mesh loading, OBJ export
 third_party/
   imgui/              Dear ImGui 1.92.9 (MIT, see its LICENSE.txt) with the Win32
                       and OpenGL 2 backends; only what the viewer needs
@@ -56,6 +56,7 @@ tests/
   texmap_test.cpp     UV atlas on every sample, stored UVs of painted files
   paint_test.cpp      texel baking, range query, color/bump/flatten dabs, undo,
                       stamps, heightmask, Fill/Clear, material masks, tangents, saving and loading paint data
+  obj_test.cpp        OBJ export read back: counts, transform, closed surface, normals, UVs, quads
   brush_bench.cpp     times strokes phase by phase (not a test; brush_bench <file.sc1>)
 ```
 
@@ -128,7 +129,8 @@ images named in a painted .sc1 are loaded from where the file says, if they
 exist.
 
 `--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]
-[--brush-mask image] [--brush-texture image] [--heightmask] [--cavity]`
+[--brush-mask image] [--brush-texture image] [--heightmask] [--cavity]
+[--export-obj file.obj] [--obj-normals]`
 renders one frame (after a few demo strokes, in paint mode with paint strokes
 and a gold layer; --brush-mask also shapes the sculpt strokes; --save saves as `<name>_bildhauer.sc1` first) and exits.
 
@@ -174,6 +176,7 @@ Implementation:
 |---|---|
 | Mesh kernel (stores, add/remove triangle, normals, validation) | done (`src/core`), tested on all samples |
 | `.sc1` read/write, mesh loading, mirroring | done (`src/io`); v8 round trip byte-identical, v0 upgrades to v8 |
+| OBJ export as Sculptris writes it (export transform, mirrored half, UVs in paint mode, quads) | done (`src/io/obj`, File menu); re/docs/obj.md, read back and checked on all samples |
 | Edge split, brush tessellation, collapse, reduction, beautify, subdivision (incl. quads) | done (`src/core`); topology kept on all samples and a quad cube |
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
 | Sculpt brush mask (Draw, Smooth, Flatten) | done (`src/core/brush`, Sculpt panel); after brushes.md 3.4 |

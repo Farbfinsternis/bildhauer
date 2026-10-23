@@ -149,6 +149,9 @@ void menuBar() {
     if (ImGui::MenuItem("Save", "Ctrl+S")) commandSave();
     if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) commandSaveAs();
     ImGui::Separator();
+    if (ImGui::MenuItem("Export OBJ...")) commandExportObj();
+    ImGui::MenuItem("Export vertex normals", nullptr, &app.exportNormals);
+    ImGui::Separator();
     if (ImGui::MenuItem("Exit")) PostMessageA(app.hwnd, WM_CLOSE, 0, 0);
     ImGui::EndMenu();
   }
