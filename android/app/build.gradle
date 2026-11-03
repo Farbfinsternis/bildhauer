@@ -1,0 +1,35 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'org.bildhauer.app'
+    compileSdk 36
+    buildToolsVersion '35.0.0'
+    ndkVersion '30.0.16248370'
+
+    defaultConfig {
+        applicationId 'org.bildhauer.app'
+        minSdk 28
+        targetSdk 36
+        versionCode 2
+        versionName '0.1.2'
+        testInstrumentationRunner 'org.bildhauer.app.SmokeInstrumentation'
+        ndk { abiFilters 'arm64-v8a' }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static', '-DBILDHAUER_ANDROID_OPTIMIZE_DEBUG=ON'
+                targets 'bildhauer_android'
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake { path file('../../CMakeLists.txt'); version '3.31.6' }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    // Keep the development signing key beside the SDK caches, including on F:.
+    signingConfigs {
+        debug { storeFile file("${System.getenv('ANDROID_USER_HOME') ?: System.getProperty('user.home') + '/.android'}/debug.keystore") }
+    }
+}

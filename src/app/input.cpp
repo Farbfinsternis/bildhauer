@@ -1,3 +1,4 @@
+#include "platform/windows/host.h"
 #include "app/input.h"
 
 #include <algorithm>
@@ -26,7 +27,7 @@ void onMaterialKey(WPARAM key) {
     case 'L': addMaterialLayer(); return;
     case 'M': mt.matcap = nextBuiltinMatcap(mt.matcap); break;
     case 'O': {
-      std::string file = openFileDialog(app.hwnd, kImageFilter);
+      std::string file = openFileDialog(windowsHost.hwnd, kImageFilter);
       if (file.empty()) return;
       mt.matcap = file;
       break;
@@ -100,80 +101,8 @@ void onSculptKey(WPARAM key, bool ctrl) {
 
 }  // namespace
 
-StrokeInput inputAt(int mx, int my, PickHit* hitOut) {
-  const Camera& c = app.camera;
-  float aspect = float(app.viewW) / float(std::max(app.viewH, 1));
-  float x = (2.0f * (mx - app.viewX) / app.viewW - 1) * std::tan(kFov / 2) * aspect;
-  float y = (1 - 2.0f * (my - app.viewY) / app.viewH) * std::tan(kFov / 2);
-  StrokeInput in;
-  in.rayOrigin = c.eye();
-  in.rayDir = normalize(c.forward() + c.right() * x + c.up() * y);
-  in.viewDir = c.forward();
-  in.camRight = c.right();
-  in.camUp = c.up();
-  in.mouseX = float(mx);
-  in.mouseY = float(my);
-  PickHit h = pick(app.mesh, in.rayOrigin, in.rayDir);
-  in.point = h.visiblePoint();
-  in.hit = h.hit;
-  if (hitOut) *hitOut = h;
-  return in;
-}
-
-void beginStroke(int mx, int my, bool invert, bool smoothing) {
-  PickHit h;
-  StrokeInput in = inputAt(mx, my, &h);
-  if (!h.hit) return;
-  pushUndo();
-  BrushSettings s = app.brush;
-  if (smoothing) s.tool = Tool::Smooth;
-  s.radius = worldRadius(in.point);
-  s.detailSize = s.radius;
-  s.strength = brushStrength(sliders(s.tool).strength);
-  // Mask paints toward weight 0 by default (negative strength).
-  if (s.tool == Tool::Mask) s.strength = -std::fabs(s.strength);
-  if (invert) s.strength = -s.strength;
-  s.stamp = sculptMaskActive() ? &app.sculptStamp : nullptr;
-  s.stampMode = app.stampMode;
-  s.stampAngle = app.stampAngle * kPi / 180;
-  app.stroke = std::make_unique<Stroke>(app.mesh, s, in);
-  app.modified = true;
-}
-
-void beginPaintStroke(int mx, int my, bool invert) {
-  StrokeInput in = inputAt(mx, my);
-  if (!in.hit) return;
-  const std::array<float, 3>& ps = paintSliders();
-  PaintSettings s = app.paint;
-  s.radius = worldRadius(in.point);
-  s.strength = brushStrength(ps[1]) * (invert ? -1.0f : 1.0f);
-  s.hardness = ps[2];
-  s.target = app.editSlot;
-  // The view the stroke is painted from: the screen axes turn a fixed stamp;
-  // stamp and angle falloff face the surface (PaintStroke), the viewer only
-  // where no texel is near.
-  s.toViewer = -app.camera.forward();
-  s.screenRight = app.camera.right();
-  s.screenUp = app.camera.up();
-  s.stamps = stampsActive() ? &app.stamps : nullptr;
-  s.stampTexture = app.textureOn && !app.textureImage.empty();
-  s.stampMode = app.stampMode;
-  s.stampAngle = app.stampAngle * kPi / 180;
-  app.paintStroke = std::make_unique<PaintStroke>(*app.canvas, s, in.point);
-  app.modified = true;
-}
-
-void setTool(Tool t) {
-  if (app.brush.tool == t) {
-    if (t == Tool::Draw) app.brush.clay = !app.brush.clay;
-    if (t == Tool::Flatten) app.brush.lockPlane = !app.brush.lockPlane;
-    if (t == Tool::Grab || t == Tool::Rotate || t == Tool::Scale) app.brush.global = !app.brush.global;
-  }
-  app.brush.tool = t;
-}
-
 void onMouseDown(UINT msg, int x, int y, WPARAM flags) {
-  SetCapture(app.hwnd);
+  SetCapture(windowsHost.hwnd);
   if (msg == WM_LBUTTONDOWN) {
     if (GetKeyState(VK_MENU) < 0) app.orbiting = true;
     else if (app.paintMode) beginPaintStroke(x, y, (flags & MK_CONTROL) != 0);
@@ -201,18 +130,7 @@ void onMouseMove(int x, int y) {
     float scale = app.camera.distance * 2 * std::tan(kFov / 2) / float(app.viewH);
     app.camera.target += (app.camera.right() * float(-dx) + app.camera.up() * float(dy)) * scale;
   }
-  StrokeInput in = inputAt(x, y, &app.hover);
-  if (app.stroke) {
-    if (in.hit) {
-      float r = worldRadius(in.point);
-      app.stroke->setSize(r, r);
-    }
-    app.stroke->moveTo(in);
-  }
-  if (app.paintStroke) {
-    if (in.hit) app.paintStroke->setRadius(worldRadius(in.point));
-    app.paintStroke->moveTo(in.point, in.hit);
-  }
+  moveStroke(x, y);
   app.mouseX = x;
   app.mouseY = y;
 }

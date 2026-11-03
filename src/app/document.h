@@ -7,10 +7,15 @@
 
 namespace bh::viewer {
 
-// An icosphere as the new model (full mesh, no symmetry).
+struct Camera;
+
+// An icosphere as the new model, with symmetry on as in Sculptris.
 void newModel();
 // Points the camera at the whole model.
 void frameModel();
+// The side the camera looks from when it sits on a world axis, as the axis
+// gizmo names it ("View from +X (right)"); null between the axes.
+const char* axisViewName(const Camera& camera);
 // Loads an .sc1; a painted file opens in paint mode. On failure the current
 // model stays.
 bool loadModel(const std::string& path, std::string* error);
@@ -29,7 +34,9 @@ void commandExportObj();
 // Asks whether to save unsaved changes: false if the user cancels.
 bool confirmDiscard();
 
-void pushUndo();
+// False when a snapshot would exceed the configured memory budget; the
+// caller must then leave the model unchanged.
+bool pushUndo();
 void undoLast();  // the last stroke or mesh operation (paint mode: the last stroke)
 void subdivideAll();
 void reduceAll();

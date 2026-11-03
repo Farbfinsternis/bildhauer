@@ -1,6 +1,6 @@
 #pragma once
 
-// Image files (PNG, JPEG, BMP, ...) through the Windows Imaging Component.
+// Image decoding supplied by the platform host (Windows: WIC).
 
 #include <cstdint>
 #include <string>
@@ -13,7 +13,7 @@ struct Image {
   std::vector<uint32_t> rgba;  // rows from the top, 0xAABBGGRR
 };
 
-// Needs COM initialized on the calling thread.
+// On Windows, needs COM initialized on the calling thread.
 bool loadImage(const std::string& path, Image& out, std::string* error);
 
 }  // namespace bh::viewer

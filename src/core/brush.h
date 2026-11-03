@@ -47,6 +47,7 @@ struct BrushSettings {
   bool clay = false, soft = false;              // Draw
   bool lockPlane = false, angleFalloff = false; // Flatten
   bool global = false, limit = false, xyz = false;  // Grab, Rotate, Scale
+  bool anchoredGrab = false; // mobile: keep the initially gripped reference region
   bool respectMask = true;
   bool compensateSymmetry = true;
 
@@ -77,10 +78,15 @@ class Stroke {
  public:
   Stroke(Mesh& mesh, const BrushSettings& settings, const StrokeInput& start);
   void moveTo(const StrokeInput& input);
-  // The radius follows the view depth under the pointer during the stroke;
-  // dab spacing scales with it.
+  // Surface brush radius follows view depth; transform drags retain the
+  // initial size and plane. Dab spacing scales with radius updates.
   void setSize(float radius, float detailSize);
+  // Pressure changes strength without starting a new stroke or undo step.
+  void setStrength(float strength) { s_.strength = strength; }
   int dabCount() const { return dabs_; }
+  Tool tool() const { return s_.tool; }
+  float radius() const { return s_.radius; }
+  Vec3 dragTarget(const StrokeInput& in) const { return dragPoint(in); }
   const DabTimes& times() const { return times_; }
 
  private:
@@ -123,6 +129,7 @@ class Stroke {
   DabTimes times_;
 
   Vec3 anchor_;       // Grab/Rotate/Scale pivot
+  Vec3 grabOrigin_, grabOffset_; // anchored Grab reference center and accumulated drag
   Vec3 planeN_, planeP_;  // locked Flatten plane
   bool planeLocked_ = false;
   float reduceMin_ = 1e5f;
@@ -140,6 +147,7 @@ class Stroke {
   // its mirror image with symmetry). Rebuilt only when the brush reach leaves
   // it; all tool loops run over it.
   std::vector<int> region_;
+  std::vector<int> geometryVertices_; // Grab: changed this dab, not the whole stroke
   std::vector<char> inRegion_;
   Vec3 regionCenter_;
   float regionRadius_ = 0;

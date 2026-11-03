@@ -2,7 +2,7 @@
 
 // Matcaps for the viewer: a few computed ones (no image assets ship with
 // bildhauer), named "bildhauer:<name>", and image files (PNG, JPEG, ...) read
-// through the Windows Imaging Component, so a painted .sc1 can show the
+// through the platform image decoder, so a painted .sc1 can show the
 // matcap images it names where they exist on this machine.
 //
 // Pixels are RGB rows from the bottom up: row 0 is a view-space normal

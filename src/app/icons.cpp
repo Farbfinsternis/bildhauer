@@ -182,6 +182,17 @@ void drawIcon(ImDrawList* list, Icon icon, ImVec2 center, float size, ImU32 ink,
       p.segment(0.4f, -0.8f, 0.8f, -0.4f);
       list->AddLine(p.at(-0.8f, -0.8f), p.at(-0.4f, -0.4f), faint, p.line);
       break;
+    case Icon::Undo: {  // a hooked arrow back to the left, unlike Rotate's circle
+      std::vector<ImVec2> hook{p.at(-0.45f, 0.35f)};
+      for (int i = 0; i <= 16; ++i) {
+        const float a = (90 - 180 * i / 16.0f) * kPi / 180;
+        hook.push_back(p.at(0.25f + 0.45f * std::cos(a), -0.1f + 0.45f * std::sin(a)));
+      }
+      hook.push_back(p.at(-0.5f, -0.55f));
+      list->AddPolyline(hook.data(), int(hook.size()), ink, ImDrawFlags_None, p.line);
+      list->AddTriangleFilled(p.at(-0.85f, 0.35f), p.at(-0.4f, 0.68f), p.at(-0.4f, 0.02f), ink);
+      break;
+    }
   }
 }
 

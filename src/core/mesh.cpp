@@ -4,6 +4,13 @@
 
 namespace bh {
 
+size_t Mesh::storageBytes() const {
+  return sizeof(Mesh) + vertices_.capacity() * sizeof(Vertex) + edges_.capacity() * sizeof(Edge) +
+         triangles_.capacity() * sizeof(Triangle) +
+         (freeVertices_.capacity() + freeEdges_.capacity() + freeTriangles_.capacity() + dirtyVertices.capacity()) * sizeof(int) +
+         (triStamp_.capacity() + vertStamp_.capacity()) * sizeof(uint32_t) + quadMarkers.capacity();
+}
+
 namespace {
 
 template <typename T>

@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -109,6 +110,8 @@ class Mesh {
 
   // Checks all back references and limits; returns false with a message.
   bool validate(std::string* error) const;
+  // Allocated mesh storage, for a bounded snapshot undo history.
+  size_t storageBytes() const;
 
   // Polygon list: per triangle slot 0 = triangle, 1 = first and 2 = second
   // triangle of a quad (slots t and t + 1). Empty = no quads.

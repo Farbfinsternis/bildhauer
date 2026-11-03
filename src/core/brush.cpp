@@ -45,6 +45,7 @@ Stroke::Stroke(Mesh& mesh, const BrushSettings& settings, const StrokeInput& sta
     : mesh_(mesh), s_(settings), start_(start), path_(start.point),
       anchor_(start.point) {
   if (mesh_.symmetric && anchor_.x < 0) anchor_.x = -anchor_.x;
+  grabOrigin_ = anchor_;
   stampDirection_ = -start.camUp;
   mesh_.storeReference();
   if (s_.detailFactor >= 0.1f || s_.tool == Tool::Reduce) mesh_.clearQuads();
@@ -56,19 +57,22 @@ float Stroke::weight(int v) const { return s_.respectMask ? mesh_.vertex(v).weig
 
 void Stroke::updateRegion(const Vec3& c) {
   const bool transformTool = s_.tool == Tool::Grab || s_.tool == Tool::Rotate || s_.tool == Tool::Scale;
+  const bool anchored = s_.tool == Tool::Grab && s_.anchoredGrab && !s_.global && !s_.limit;
   const float reach = 1.6f * s_.radius;
   const bool all = transformTool && s_.global;
+  if (anchored && regionValid_) return;
   if (!all && regionValid_ && length(c - regionCenter_) + reach <= regionRadius_) return;
-  regionCenter_ = c;
+  regionCenter_ = anchored ? grabOrigin_ : c;
   regionRadius_ = 2 * reach;
   regionValid_ = !all;
   region_.clear();
   inRegion_.assign(mesh_.vertexSlots(), 0);
-  const Vec3 cm = mirrorX(c);
+  const Vec3 cm = mirrorX(regionCenter_);
   for (int v = 0; v < mesh_.vertexSlots(); ++v) {
     const Vertex& vx = mesh_.vertex(v);
     if (!vx.active) continue;
-    if (all || length(vx.pos - c) < regionRadius_ || (mesh_.symmetric && length(vx.pos - cm) < regionRadius_)) {
+    const Vec3 p = anchored ? vx.refPos : vx.pos;
+    if (all || length(p - regionCenter_) < regionRadius_ || (mesh_.symmetric && length(p - cm) < regionRadius_)) {
       region_.push_back(v);
       inRegion_[v] = 1;
     }
@@ -76,10 +80,12 @@ void Stroke::updateRegion(const Vec3& c) {
 }
 
 Vec3 Stroke::dragPoint(const StrokeInput& in) const {
-  // Pointer ray against the view plane through the anchor.
-  float denom = dot(in.rayDir, in.viewDir);
-  if (std::fabs(denom) < 1e-6f) return anchor_;
-  float t = dot(anchor_ - in.rayOrigin, in.viewDir) / denom;
+  // Keep the plane at the visible start hit. anchor_ changes as Grab moves
+  // and is mirrored into stored mesh space; neither may move the view plane.
+  const Vec3 normal = normalize(start_.viewDir);
+  float denom = dot(in.rayDir, normal);
+  if (std::fabs(denom) < 1e-6f) return start_.point;
+  float t = dot(start_.point - in.rayOrigin, normal) / denom;
   return in.rayOrigin + in.rayDir * t;
 }
 
@@ -193,17 +199,21 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
   auto clock = std::chrono::steady_clock::now();
   const auto dabStart = clock;
   const Tool tool = s_.tool;
+  geometryVertices_.clear();
   const bool transformTool = tool == Tool::Grab || tool == Tool::Rotate || tool == Tool::Scale;
   updateRegion(c);
   if (tool != Tool::Smooth && tool != Tool::Reduce && !(transformTool && s_.global)) {
     BrushDetail detail;
     detail.center = c;
+    if (tool == Tool::Grab && s_.anchoredGrab && !s_.global && !s_.limit)
+      detail.center = grabOrigin_ + grabOffset_;
     detail.radius = s_.radius;
     detail.detailSize = s_.detailSize;
     detail.detailFactor = s_.detailFactor;
     detail.beautify = false;  // the caller runs beautify once per frame
     std::vector<int> created;
     tessellateForBrush(mesh_, detail, &region_, &created);
+    if (tool == Tool::Grab) geometryVertices_.insert(geometryVertices_.end(), created.begin(), created.end());
     inheritCoverage(created);
     inRegion_.resize(mesh_.vertexSlots(), 0);
     for (int v : created)
@@ -227,7 +237,7 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
     case Tool::Reduce: reduce(c); break;
   }
   times_.tool += msSince(clock);
-  mesh_.updateGeometryAround(mesh_.dirtyVertices);
+  mesh_.updateGeometryAround(tool == Tool::Grab ? geometryVertices_ : mesh_.dirtyVertices);
   times_.geometry += msSince(clock);
   auto start = dabStart;
   times_.worstDab = std::max(times_.worstDab, msSince(start));
@@ -513,6 +523,7 @@ void Stroke::grab(const Vec3& c) {
       if (vx.onSymmetryPlane) d.x = 0;
       vx.pos = vx.refPos + d;
       mesh_.setDirty(v);
+      geometryVertices_.push_back(v);
     }
     return;
   }
@@ -521,6 +532,25 @@ void Stroke::grab(const Vec3& c) {
     if (l > 0) delta = delta / l * (r * std::atan(l / r));
   }
   const float k = std::min(1.0f, (1.2f * std::fabs(s_.strength)) * (1.2f * std::fabs(s_.strength)));
+  if (s_.anchoredGrab && !s_.limit) {
+    // Hold the original material instead of painting a moving influence
+    // sphere across it. Integrating strength avoids a snap-back as pen
+    // pressure falls at release; constant-pressure motion is frame independent.
+    grabOffset_ += delta * k;
+    for (int v : region_) {
+      Vertex& vx = mesh_.vertex(v);
+      if (!usable(vx)) continue;
+      const float x = 1.1f * length(vx.refPos - grabOrigin_) / r;
+      if (x >= 1) continue;
+      Vec3 d = grabOffset_ * (smoothFalloff(1 - x) * weight(v));
+      if (vx.onSymmetryPlane) d.x = 0;
+      vx.pos = vx.refPos + d;
+      touched(mesh_, v);
+      geometryVertices_.push_back(v);
+    }
+    anchor_ = c;
+    return;
+  }
   for (int v : region_) {
     Vertex& vx = mesh_.vertex(v);
     if (!usable(vx)) continue;
@@ -536,6 +566,7 @@ void Stroke::grab(const Vec3& c) {
       vx.pos += d * (smoothFalloff(1 - x) * k * weight(v));
     }
     touched(mesh_, v);
+    geometryVertices_.push_back(v);
   }
   if (!s_.limit) anchor_ = c;
 }

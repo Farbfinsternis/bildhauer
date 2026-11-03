@@ -6,7 +6,7 @@
 #include <utility>
 
 #include "app/app.h"
-#include "app/dialogs.h"
+
 #include "app/images.h"
 #include "app/matcaps.h"
 #include "core/reduce.h"
@@ -55,6 +55,7 @@ void makeIcosphere(Mesh& m, int levels) {
 
 // Back to sculpt mode with an empty history, for a new or loaded model.
 void resetDocument() {
+  app.pendingGrab.valid = false;
   app.stroke.reset();
   app.paintStroke.reset();
   app.undo.clear();
@@ -68,13 +69,12 @@ void resetDocument() {
   app.hover = PickHit{};
 }
 
-std::string fileName(const std::string& path) { return path.substr(path.find_last_of("/\\") + 1); }
-
 }  // namespace
 
 void newModel() {
   resetDocument();
   makeIcosphere(app.mesh, 3);
+  symmetryOn(app.mesh);  // Sculptris starts with symmetry on
   app.file = Sc1File{};
   app.path.clear();
   frameModel();
@@ -93,6 +93,20 @@ void frameModel() {
   app.camera.target = (lo + hi) * 0.5f;
   app.sceneSize = std::fmax(length(hi - lo), 1e-3f);
   app.camera.distance = app.sceneSize * 1.6f;
+}
+
+const char* axisViewName(const Camera& camera) {
+  struct Side { Vec3 eye; const char* name; };
+  static const Side sides[] = {
+      {{1, 0, 0}, "View from +X (right)"}, {{-1, 0, 0}, "View from -X (left)"},
+      {{0, 1, 0}, "View from +Y (top)"},   {{0, -1, 0}, "View from -Y (bottom)"},
+      {{0, 0, 1}, "View from +Z (front)"}, {{0, 0, -1}, "View from -Z (back)"},
+  };
+  // Within about 6 degrees: the gizmo's top and bottom views tilt by 1.5, not pi/2.
+  const Vec3 eye = normalize(camera.eye() - camera.target);
+  for (const Side& s : sides)
+    if (dot(eye, s.eye) > 0.995f) return s.name;
+  return nullptr;
 }
 
 bool loadModel(const std::string& path, std::string* error) {
@@ -151,75 +165,20 @@ std::string defaultSavePath() {
   return out + ".sc1";
 }
 
-void commandNew() {
-  if (confirmDiscard()) newModel();
-}
-
-void commandOpen() {
-  if (!confirmDiscard()) return;
-  std::string path = openFileDialog(app.hwnd, kSc1Filter);
-  if (path.empty()) return;
-  std::string err;
-  if (!loadModel(path, &err)) app.status = "cannot open " + fileName(path) + ": " + err;
-}
-
-void commandSaveAs() {
-  std::string path = saveFileDialog(app.hwnd, kSc1Filter, app.savePath.empty() ? defaultSavePath() : app.savePath, "sc1");
-  if (path.empty()) return;
-  std::string err;
-  if (saveModel(path, &err)) {
-    app.savePath = path;
-    app.modified = false;
-    app.status = "saved " + fileName(path);
-  } else {
-    app.status = "save failed: " + err;
+bool pushUndo() {
+  const size_t incoming = app.mesh.storageBytes();
+  if (incoming > app.undoBudget) {
+    app.status = "Model exceeds the undo memory budget";
+    return false;
   }
-}
-
-void commandExportObj() {
-  std::string base = app.savePath.empty() ? defaultSavePath() : app.savePath;
-  if (base.size() > 4 && base.substr(base.size() - 4) == ".sc1") base.resize(base.size() - 4);
-  std::string path = saveFileDialog(app.hwnd, kObjFilter, base + ".obj", "obj");
-  if (path.empty()) return;
-  ObjExport options;
-  options.scale = app.file.extraA;
-  options.offset = app.file.extraVec;
-  options.normals = app.exportNormals;
-  if (app.paintMode) options.uvs = &app.texmap;
-  std::string err;
-  app.status = writeObj(path, app.mesh, options, &err) ? "exported " + fileName(path) : "export failed: " + err;
-}
-
-void commandSave() {
-  if (app.savePath.empty()) {
-    commandSaveAs();
-    return;
+  size_t used = 0;
+  for (const auto& m : app.undo) used += m.storageBytes();
+  while (!app.undo.empty() && (app.undo.size() >= 20 || used > app.undoBudget - incoming)) {
+    used -= app.undo.front().storageBytes();
+    app.undo.pop_front();
   }
-  std::string err;
-  if (saveModel(app.savePath, &err)) {
-    app.modified = false;
-    app.status = "saved " + fileName(app.savePath);
-  } else {
-    app.status = "save failed: " + err;
-  }
-}
-
-bool confirmDiscard() {
-  if (!app.modified) return true;
-  std::string name = app.path.empty() ? "the new model" : fileName(app.path);
-  int answer = MessageBoxA(app.hwnd, ("Save changes to " + name + "?").c_str(), "bildhauer",
-                           MB_YESNOCANCEL | MB_ICONQUESTION);
-  if (answer == IDCANCEL) return false;
-  if (answer == IDYES) {
-    commandSave();
-    return !app.modified;  // still modified: the save was cancelled or failed
-  }
-  return true;
-}
-
-void pushUndo() {
   app.undo.push_back(app.mesh);
-  if (app.undo.size() > 20) app.undo.pop_front();
+  return true;
 }
 
 void undoLast() {
@@ -237,14 +196,14 @@ void undoLast() {
 
 void subdivideAll() {
   if (app.paintMode) return;
-  pushUndo();
+  if (!pushUndo()) return;
   subdivide(app.mesh, {true, app.mesh.symmetric});
   app.modified = true;
 }
 
 void reduceAll() {
   if (app.paintMode) return;
-  pushUndo();
+  if (!pushUndo()) return;
   reduceMesh(app.mesh);
   app.modified = true;
 }
@@ -252,7 +211,7 @@ void reduceAll() {
 void setSymmetry(bool on) {
   if (app.paintMode || app.mesh.symmetric == on) return;
   app.stroke.reset();
-  pushUndo();
+  if (!pushUndo()) return;
   if (on) {
     const int converted = symmetryOn(app.mesh);
     app.status = "symmetry on";
@@ -303,11 +262,6 @@ void fillLayer(bool invert) {
 const char* fillLabel() {
   if (app.paint.tool != PaintTool::Color) return "Clear bump";
   return app.editSlot > 0 ? "Fill layer mask" : "Fill color";
-}
-
-bool chooseStampImage(bool mask) {
-  std::string path = openFileDialog(app.hwnd, kImageFilter);
-  return !path.empty() && loadStampImage(path, mask);
 }
 
 bool loadStampImage(const std::string& path, bool mask) {

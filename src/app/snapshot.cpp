@@ -1,3 +1,4 @@
+#include "platform/windows/host.h"
 #include "app/snapshot.h"
 
 #include <windows.h>
@@ -112,7 +113,7 @@ void runPaintDemo() {
 
 int runSnapshot(const SnapshotOptions& o) {
   RECT rc;
-  GetClientRect(app.hwnd, &rc);
+  GetClientRect(windowsHost.hwnd, &rc);
   app.width = rc.right;
   app.height = rc.bottom;
   layoutView(o.ui);

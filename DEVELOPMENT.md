@@ -82,7 +82,16 @@ cmake --build build-release --target bildhauer
 The ZIP holds `bildhauer.exe`, `README.md`, `LICENSE.txt` and Dear ImGui's license
 as `LICENSE-imgui.txt`.
 
-### Running the viewer
+### Android tablet prototype
+
+The experimental Android build shares `src/core`, `src/io`, the document
+operations and stroke interaction with Windows. The Android project,
+build/install script, controls, supported features and device smoke test are
+documented in [android/README.md](android/README.md). Platform-specific
+implementations live in `src/platform/windows` and `src/platform/android`.
+The Windows build remains available through the existing CMake commands.
+
+### Running the Windows viewer
 
 ```bat
 build\bildhauer.exe "F:\Grafik\Sculptris Alpha 6\models\head.sc1"

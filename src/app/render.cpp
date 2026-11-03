@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "app/app.h"
 #include "app/gl2.h"
@@ -334,6 +336,27 @@ void drawPaintMesh(bool mirrored) {
   glFrontFace(GL_CCW);
 }
 
+// Sculptris marks the mirror plane on the mesh with a faint light line: the
+// stored half's edges on x = 0, pulled slightly toward the eye against
+// z-fighting.
+void drawSymmetryLine() {
+  const Mesh& m = app.mesh;
+  const Vec3 eye = app.camera.eye();
+  glLineWidth(2);
+  glColor4f(1, 1, 1, 0.18f);
+  glBegin(GL_LINES);
+  for (int i = 0; i < m.edgeSlots(); ++i) {
+    const Edge& e = m.edge(i);
+    if (!e.active || !m.vertex(e.v[0]).onSymmetryPlane || !m.vertex(e.v[1]).onSymmetryPlane) continue;
+    for (int v : e.v) {
+      const Vec3 p = m.vertex(v).pos, q = p + (eye - p) * 0.002f;
+      glVertex3f(q.x, q.y, q.z);
+    }
+  }
+  glEnd();
+  glLineWidth(1);
+}
+
 void drawBrushCursor() {
   if (!app.hover.hit) return;
   Vec3 c = app.hover.point, n = app.hover.normal;
@@ -376,17 +399,27 @@ void renderScene() {
     drawPaintMesh(false);
     if (app.mesh.symmetric) drawPaintMesh(true);
   } else {
-    glBindTexture(GL_TEXTURE_2D, app.matcap);
+    glBindTexture(GL_TEXTURE_2D, builtinMatcapTexture(app.sculptMatcap));
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
     drawMesh(false);
-    if (app.mesh.symmetric) drawMesh(true);
+    if (app.mesh.symmetric) {
+      drawMesh(true);
+      drawSymmetryLine();
+    }
   }
   glDisable(GL_CULL_FACE);
   drawBrushCursor();
 }
 
+unsigned int builtinMatcapTexture(const std::string& name) {
+  static std::vector<std::pair<std::string, GLuint>> made;
+  for (const auto& [n, tex] : made)
+    if (n == name) return tex;
+  made.emplace_back(name, matcapTexture(name, false, nullptr));
+  return made.back().second;
+}
+
 void initRendering() {
-  app.matcap = matcapTexture(builtinMatcaps()[0], false, nullptr);
   initPaintShader();
 }
 

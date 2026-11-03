@@ -3,14 +3,11 @@
 // Viewer state shared by the app modules: the model and its paint data, the
 // camera, the tool settings, and what the window shows.
 
-#include <windows.h>
-
-#include <GL/gl.h>
-
 #include <array>
 #include <cmath>
 #include <deque>
 #include <memory>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -42,8 +39,6 @@ struct Camera {
 };
 
 struct App {
-  HWND hwnd = nullptr;
-  HDC hdc = nullptr;
   int width = 1280, height = 800;
   // The 3D view: the part of the window the UI panels leave free, in client
   // pixels from the top left (layoutView).
@@ -61,7 +56,14 @@ struct App {
   bool beautify = true;  // "Beautify/relax mesh (always used when adding detail)"
   std::array<ToolSliders, int(Tool::Reduce) + 1> sliders;
   std::unique_ptr<Stroke> stroke;
+  float strokeStrength = 0;
+  struct PendingGrab {
+    bool valid = false;
+    int x = 0, y = 0;
+    float pressure = 1;
+  } pendingGrab;
   std::deque<Mesh> undo;
+  size_t undoBudget = std::numeric_limits<size_t>::max();
 
   // Paint mode (one way, as in Sculptris): texture mapping, layers, and their
   // textures. Sliders per paint tool (size, strength, hardness): size and
@@ -90,20 +92,22 @@ struct App {
   bool sculptMaskOn = false;
   Stamp sculptStamp;
   bool uploadAll = false;  // the canvas is new: upload whole textures
-  GLuint colorTex = 0, normalTex = 0;
+  unsigned int colorTex = 0, normalTex = 0;
   struct SlotTextures {
-    GLuint matcap = 0, mask = 0;
+    unsigned int matcap = 0, mask = 0;
     std::string key;  // matcap name and gray/colored it was made for
   };
   std::array<SlotTextures, kMaxMaterials> slotTex;
-  GLuint paintShader = 0;  // 0: no OpenGL 2.0, a stand-in shading is used
+  unsigned int paintShader = 0;  // 0: no OpenGL 2.0, a stand-in shading is used
 
   bool wireframe = false;
   bool exportNormals = false;  // "Export vertex normals in OBJ" (off, as in Sculptris)
   int mouseX = 0, mouseY = 0;
   bool orbiting = false, panning = false;
   PickHit hover;
-  GLuint matcap = 0;
+  unsigned int matcap = 0;
+  // Sculpt mode material; red wax, as in Sculptris (the MATERIAL button).
+  std::string sculptMatcap = "bildhauer:redwax";
   std::string status;
 };
 

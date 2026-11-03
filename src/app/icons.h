@@ -2,7 +2,7 @@
 
 // Tool icons, drawn as simple vector shapes with ImGui's draw list (no image
 // files). The sculpt brushes show a surface in profile and what they do to
-// it; the paint tools a drop of paint and the bump. Two more serve the view
+// it; the paint tools a drop of paint and the bump. Three more serve the view
 // buttons.
 
 #include "core/brush.h"
@@ -14,7 +14,7 @@ namespace bh::viewer {
 enum class Icon {
   Draw, Smooth, Grab, Inflate, Flatten, Pinch, Mask, Crease, Rotate, Scale, Reduce,
   PaintColor, PaintBump, PaintFlatten,
-  Frame, Wireframe,  // view buttons
+  Frame, Wireframe, Undo,  // view buttons
 };
 
 Icon toolIcon(Tool tool);

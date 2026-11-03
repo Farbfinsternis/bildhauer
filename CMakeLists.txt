@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(ANDROID)
+  option(BILDHAUER_ANDROID_OPTIMIZE_DEBUG "Optimize native Android debug code" OFF)
+  if(BILDHAUER_ANDROID_OPTIMIZE_DEBUG)
+    add_compile_options("$<$<CONFIG:Debug>:-O2>")
+  endif()
+endif()
+
 if(MSVC)
   add_compile_options(/W4 /permissive- /utf-8 /EHsc)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
@@ -46,17 +53,30 @@ if(WIN32)
     src/app/app.cpp
     src/app/dialogs.cpp
     src/app/document.cpp
+    src/platform/windows/document_commands.cpp
     src/app/gl2.cpp
     src/app/icons.cpp
     src/app/images.cpp
     src/app/input.cpp
+    src/app/interaction.cpp
     src/app/matcaps.cpp
     src/app/render.cpp
     src/app/snapshot.cpp
     src/app/ui.cpp
+    src/app/widgets.cpp
   )
   target_link_libraries(bildhauer PRIVATE bildhauer_core imgui opengl32 comdlg32 windowscodecs ole32 dwmapi)
   target_compile_definitions(bildhauer PRIVATE WIN32_LEAN_AND_MEAN)
+endif()
+
+if(ANDROID)
+  option(BILDHAUER_BUILD_BENCHMARKS "Build native device benchmarks" OFF)
+  if(BILDHAUER_BUILD_BENCHMARKS)
+    add_executable(grab_bench tests/grab_bench.cpp)
+    target_link_libraries(grab_bench PRIVATE bildhauer_core)
+  endif()
+  add_subdirectory(android/native)
+  return() # Desktop test executables are built/run on the host.
 endif()
 
 # Tests run against .sc1 files that are not part of the repository (Sculptris
@@ -74,6 +94,15 @@ if(NOT BILDHAUER_SC1_SAMPLES)
 endif()
 
 enable_testing()
+add_executable(interaction_test
+  tests/interaction_test.cpp src/app/app.cpp src/app/document.cpp
+  src/app/interaction.cpp src/app/matcaps.cpp)
+target_link_libraries(interaction_test PRIVATE bildhauer_core)
+add_test(NAME interaction COMMAND interaction_test)
+add_executable(grab_test tests/grab_test.cpp)
+target_link_libraries(grab_test PRIVATE bildhauer_core)
+add_test(NAME grab COMMAND grab_test)
+
 add_executable(sc1_test tests/sc1_test.cpp)
 target_link_libraries(sc1_test PRIVATE bildhauer_core)
 add_test(NAME sc1 COMMAND sc1_test ${BILDHAUER_SC1_SAMPLES})

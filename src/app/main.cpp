@@ -1,3 +1,4 @@
+#include "platform/windows/host.h"
 // bildhauer viewer: Win32 + OpenGL, UI with Dear ImGui (third_party/imgui).
 //
 //   bildhauer [file.sc1]      (without a file: an icosphere)
@@ -25,6 +26,7 @@
 #include "app/render.h"
 #include "app/snapshot.h"
 #include "app/ui.h"
+#include "app/widgets.h"
 #include "core/relax.h"
 #include "imgui_impl_win32.h"
 
@@ -91,10 +93,10 @@ bool createWindow(HINSTANCE instance) {
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   wc.lpszClassName = "bildhauer";
   RegisterClassA(&wc);
-  app.hwnd = CreateWindowA("bildhauer", "bildhauer", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
+  windowsHost.hwnd = CreateWindowA("bildhauer", "bildhauer", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                            app.width, app.height, nullptr, nullptr, instance, nullptr);
-  if (!app.hwnd) return false;
-  app.hdc = GetDC(app.hwnd);
+  if (!windowsHost.hwnd) return false;
+  windowsHost.hdc = GetDC(windowsHost.hwnd);
   PIXELFORMATDESCRIPTOR pfd{};
   pfd.nSize = sizeof pfd;
   pfd.nVersion = 1;
@@ -102,12 +104,12 @@ bool createWindow(HINSTANCE instance) {
   pfd.iPixelType = PFD_TYPE_RGBA;
   pfd.cColorBits = 32;
   pfd.cDepthBits = 24;
-  int format = ChoosePixelFormat(app.hdc, &pfd);
-  if (!format || !SetPixelFormat(app.hdc, format, &pfd)) return false;
-  HGLRC rc = wglCreateContext(app.hdc);
-  if (!rc || !wglMakeCurrent(app.hdc, rc)) return false;
+  int format = ChoosePixelFormat(windowsHost.hdc, &pfd);
+  if (!format || !SetPixelFormat(windowsHost.hdc, format, &pfd)) return false;
+  HGLRC rc = wglCreateContext(windowsHost.hdc);
+  if (!rc || !wglMakeCurrent(windowsHost.hdc, rc)) return false;
   RECT client;
-  GetClientRect(app.hwnd, &client);
+  GetClientRect(windowsHost.hwnd, &client);
   app.width = std::max(1, int(client.right));
   app.height = std::max(1, int(client.bottom));
   return true;
@@ -117,7 +119,7 @@ void updateTitle() {
   static std::string shown;
   std::string name = app.path.empty() ? "new model" : app.path.substr(app.path.find_last_of("/\\") + 1);
   std::string title = "bildhauer - " + name + (app.modified ? " *" : "");
-  if (title != shown) SetWindowTextA(app.hwnd, title.c_str());
+  if (title != shown) SetWindowTextA(windowsHost.hwnd, title.c_str());
   shown = title;
 }
 
@@ -162,7 +164,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     return 1;
   }
   initRendering();
-  initUi(app.hwnd);
+  initUi(windowsHost.hwnd);
   if (!snapshot.path.empty()) return runSnapshot(snapshot);
 
   MSG msg;
@@ -186,9 +188,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     layoutView(true);
     renderScene();
     drawUi();
-    SwapBuffers(app.hdc);
+    SwapBuffers(windowsHost.hdc);
     updateTitle();
     if (settleFrames > 0) --settleFrames;
-    if (!viewHasMouse() && !relaxing && settleFrames == 0) WaitMessage();  // idle until the next input
+    // Idle until the next input, unless the view name under the axes is fading.
+    if (!viewHasMouse() && !relaxing && settleFrames == 0 && !axisLabelFading()) WaitMessage();
   }
 }

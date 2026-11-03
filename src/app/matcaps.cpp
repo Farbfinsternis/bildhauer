@@ -19,7 +19,6 @@ struct Builtin {
 const Builtin kBuiltins[] = {
     {"bildhauer:clay", {0.80f, 0.66f, 0.56f}, 0.22f, 0.30f, 24, 0.25f},
     {"bildhauer:white", {0.88f, 0.88f, 0.86f}, 0.30f, 0.35f, 30, 0.20f},
-    {"bildhauer:redwax", {0.72f, 0.16f, 0.12f}, 0.18f, 0.45f, 40, 0.15f},
     {"bildhauer:gold", {0.86f, 0.62f, 0.22f}, 0.10f, 0.90f, 14, 0.35f},
     {"bildhauer:jade", {0.30f, 0.62f, 0.44f}, 0.25f, 0.50f, 50, 0.20f},
     {"bildhauer:slate", {0.25f, 0.27f, 0.32f}, 0.30f, 0.40f, 20, 0.30f},
@@ -47,6 +46,30 @@ void computeBuiltin(const Builtin& b, MatcapImage& out) {
     }
 }
 
+// Red wax, the material Sculptris sculpts with: a soft pinkish sheen in front,
+// a light just above the view axis, and a red-brown body that falls off to
+// black below. Fitted to a screenshot of the Sculptris default sphere.
+constexpr const char* kRedWax = "bildhauer:redwax";
+
+void computeRedWax(MatcapImage& out) {
+  const int n = 256;
+  out.width = out.height = n;
+  out.rgb.resize(size_t(n) * n * 3);
+  const Vec3 light = normalize({0.037f, 0.355f, 0.934f});
+  const Vec3 body{138, 68, 53}, sheen{19, 42, 58}, edge{-47, -100, -105};
+  for (int y = 0; y < n; ++y)
+    for (int x = 0; x < n; ++x) {
+      float u = (x + 0.5f) / n * 2 - 1, v = (y + 0.5f) / n * 2 - 1;
+      float r2 = std::fmin(u * u + v * v, 1.0f);
+      float d = std::fmax(0.0f, dot(Vec3{u, v, std::sqrt(1 - r2)}, light));
+      Vec3 c = edge + (body - edge) * std::pow(d, 0.19f) + sheen * std::pow(d, 5.5f);
+      uint8_t* o = &out.rgb[(size_t(y) * n + x) * 3];
+      o[0] = uint8_t(std::clamp(c.x, 0.0f, 255.0f));
+      o[1] = uint8_t(std::clamp(c.y, 0.0f, 255.0f));
+      o[2] = uint8_t(std::clamp(c.z, 0.0f, 255.0f));
+    }
+}
+
 bool loadImageFile(const std::string& path, MatcapImage& out, std::string* error) {
   viewer::Image image;
   if (!viewer::loadImage(path, image, error)) return false;
@@ -70,6 +93,7 @@ const std::vector<std::string>& builtinMatcaps() {
   static const std::vector<std::string> names = [] {
     std::vector<std::string> v;
     for (const Builtin& b : kBuiltins) v.push_back(b.name);
+    v.insert(v.begin() + 2, kRedWax);
     return v;
   }();
   return names;
@@ -80,6 +104,7 @@ bool loadMatcap(const std::string& name, bool gray, MatcapImage& out, std::strin
   for (const Builtin& b : kBuiltins)
     if (name == b.name) builtin = &b;
   if (builtin) computeBuiltin(*builtin, out);
+  else if (name == kRedWax) computeRedWax(out);
   else if (!loadImageFile(name, out, error)) return false;
   if (gray)
     for (size_t i = 0; i + 2 < out.rgb.size(); i += 3) {

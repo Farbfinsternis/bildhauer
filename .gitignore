@@ -5,3 +5,15 @@ node_modules/
 # C++ build output
 build/
 build-release/
+
+# Android local configuration and generated output
+.gradle/
+.kotlin/
+.cxx/
+android/app/build/
+android/build/
+local.properties
+*.keystore
+
+# Local scratch files (screenshots, drafts)
+_work/

@@ -55,8 +55,12 @@ std::string meshToObj(const Mesh& m, const ObjExport& o) {
   std::string s;
   char line[160];
   auto add = [&](const char* fmt, auto... args) {
-    std::snprintf(line, sizeof line, fmt, args...);
-    s += line;
+    if constexpr (sizeof...(args) == 0) {
+      s += fmt;
+    } else {
+      std::snprintf(line, sizeof line, fmt, args...);
+      s += line;
+    }
   };
   const bool mirror = m.symmetric;
   const bool uv = o.uvs && !o.uvs->empty();

@@ -1,3 +1,5 @@
+#include "platform/windows/host.h"
+#include <GL/gl.h>
 #include "app/ui.h"
 
 #include <algorithm>
@@ -14,6 +16,8 @@
 #include "app/icons.h"
 #include "app/input.h"
 #include "app/matcaps.h"
+#include "app/render.h"
+#include "app/widgets.h"
 #include "imgui.h"
 #include "imgui_impl_opengl2.h"
 #include "imgui_impl_win32.h"
@@ -43,6 +47,7 @@ std::string fileName(const std::string& path) { return path.substr(path.find_las
 // A matcap's short name: "gold" for "bildhauer:gold", the file name of an image.
 std::string matcapLabel(const std::string& matcap) {
   std::string s = matcap.substr(matcap.find_last_of(":/\\") + 1);
+  if (matcap == "bildhauer:redwax") s = "red wax";
   return s.empty() ? std::string("(none)") : s;
 }
 
@@ -92,45 +97,6 @@ bool beginPanel(const char* id, float x, float w) {
                           ImGuiWindowFlags_NoBringToFrontOnFocus);
 }
 
-// A larger title with a short description under it.
-// The paint color as an ImGui color (canvas colors are 0x00BBGGRR).
-ImU32 paintColor() { return app.paint.primary | 0xFF000000u; }
-
-// The tool icon, a larger title beside it, and a short description below.
-void panelTitle(Icon icon, const char* title, const char* description) {
-  ImGui::PushFont(nullptr, ImGui::GetFontSize() / ImGui::GetStyle().FontScaleDpi * 1.6f);
-  const float side = ImGui::GetFontSize() * 1.5f;
-  const ImVec2 p = ImGui::GetCursorScreenPos();
-  drawIcon(ImGui::GetWindowDrawList(), icon, ImVec2(p.x + side / 2, p.y + side / 2), side,
-           ImGui::GetColorU32(ImGuiCol_Text), paintColor());
-  ImGui::Dummy(ImVec2(side, side));
-  ImGui::SameLine();
-  ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (side - ImGui::GetFontSize()) / 2);
-  ImGui::TextUnformatted(title);
-  ImGui::PopFont();
-  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-  ImGui::TextWrapped("%s", description);
-  ImGui::PopStyleColor();
-  ImGui::Spacing();
-}
-
-const char* toolDescription(Tool tool) {
-  switch (tool) {
-    case Tool::Draw: return "Builds up the surface along the stroke. Clay: flatter, layered build-up.";
-    case Tool::Smooth: return "Evens out the surface. Shift smooths with any tool.";
-    case Tool::Grab: return "Drags the surface along with the pointer.";
-    case Tool::Inflate: return "Pushes the surface out along its normals.";
-    case Tool::Flatten: return "Planes the surface down to the plane under the brush.";
-    case Tool::Pinch: return "Pulls the surface toward the middle of the brush.";
-    case Tool::Mask: return "Protects the surface from the other brushes.";
-    case Tool::Crease: return "Cuts a sharp groove; inverted, a sharp ridge.";
-    case Tool::Rotate: return "Turns the area under the brush.";
-    case Tool::Scale: return "Grows or shrinks the area under the brush.";
-    case Tool::Reduce: return "Removes detail under the brush; inverted, adds it.";
-  }
-  return "";
-}
-
 const char* paintToolDescription(PaintTool tool) {
   switch (tool) {
     case PaintTool::Color: return "Paints the color layer, or the mask of the selected material layer.";
@@ -152,7 +118,7 @@ void menuBar() {
     if (ImGui::MenuItem("Export OBJ...")) commandExportObj();
     ImGui::MenuItem("Export vertex normals", nullptr, &app.exportNormals);
     ImGui::Separator();
-    if (ImGui::MenuItem("Exit")) PostMessageA(app.hwnd, WM_CLOSE, 0, 0);
+    if (ImGui::MenuItem("Exit")) PostMessageA(windowsHost.hwnd, WM_CLOSE, 0, 0);
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Edit")) {
@@ -195,28 +161,6 @@ void menuBar() {
 }
 
 void sculptMaskPanel();
-
-// A tool button of the strip: the icon with a small label under it.
-bool stripButton(const char* label, Icon icon, bool selected, const char* tooltip) {
-  const ImGuiStyle& st = ImGui::GetStyle();
-  const float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetFrameHeight() * 2.3f;
-  ImGui::PushID(label);
-  const ImVec2 p = ImGui::GetCursorScreenPos();
-  const bool clicked = ImGui::InvisibleButton("##tool", ImVec2(w, h));
-  const bool hovered = ImGui::IsItemHovered();
-  ImDrawList* dl = ImGui::GetWindowDrawList();
-  const ImGuiCol bg = selected ? ImGuiCol_ButtonActive : hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button;
-  dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(bg), st.FrameRounding);
-  const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);
-  drawIcon(dl, icon, ImVec2(p.x + w / 2, p.y + h * 0.39f), h * 0.54f, ink, paintColor());
-  ImGui::PushFont(nullptr, ImGui::GetFontSize() / st.FontScaleDpi * 0.85f);
-  const ImVec2 ts = ImGui::CalcTextSize(label);
-  dl->AddText(ImVec2(p.x + (w - ts.x) / 2, p.y + h - ts.y - st.FramePadding.y), ink, label);
-  ImGui::PopFont();
-  if (tooltip && hovered && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tooltip);
-  ImGui::PopID();
-  return clicked;
-}
 
 // The tools of the current mode, one button per row.
 void toolStrip() {
@@ -285,12 +229,47 @@ void sculptBrushPanel() {
     sculptMaskPanel();
 }
 
+// The Sculptris material panel: one sphere per built-in matcap, a click
+// picks it for sculpting.
+void sculptMaterialPopup() {
+  ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  if (!ImGui::BeginPopupModal("Material", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+  const float size = ImGui::GetFrameHeight() * 4;
+  const std::vector<std::string>& names = builtinMatcaps();
+  for (size_t i = 0; i < names.size(); ++i) {
+    if (i % 3) ImGui::SameLine();
+    ImGui::BeginGroup();
+    ImGui::PushID(int(i));
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    if (ImGui::InvisibleButton("##matcap", ImVec2(size, size))) {
+      app.sculptMatcap = names[i];
+      ImGui::CloseCurrentPopup();
+    }
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    // Matcap rows run bottom-up; flip V so the sphere is lit from above.
+    draw->AddImageRounded(ImTextureRef(ImTextureID(intptr_t(builtinMatcapTexture(names[i])))), p,
+                          ImVec2(p.x + size, p.y + size), ImVec2(0, 1), ImVec2(1, 0), IM_COL32_WHITE, size / 2);
+    if (names[i] == app.sculptMatcap)
+      draw->AddCircle(ImVec2(p.x + size / 2, p.y + size / 2), size / 2 + 2, ImGui::GetColorU32(ImGuiCol_CheckMark), 0, 2);
+    const std::string label = matcapLabel(names[i]);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (size - ImGui::CalcTextSize(label.c_str()).x) / 2);
+    ImGui::TextUnformatted(label.c_str());
+    ImGui::PopID();
+    ImGui::EndGroup();
+  }
+  if (ImGui::Button("Cancel", ImVec2(-1, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+  ImGui::EndPopup();
+}
+
 // What concerns the whole model in sculpt mode.
 void sculptModelPanel() {
   ImGui::SeparatorText("Model");
   bool symmetric = app.mesh.symmetric;
   if (ImGui::Checkbox("Symmetry (x = 0)", &symmetric)) askSetSymmetry(symmetric);
   ImGui::Checkbox("Beautify while sculpting", &app.beautify);
+  if (ImGui::Button(("Material: " + matcapLabel(app.sculptMatcap)).c_str(), ImVec2(-1, 0)))
+    ImGui::OpenPopup("Material");
+  sculptMaterialPopup();
   const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
   if (ImGui::Button("Subdivide", ImVec2(half, 0))) subdivideAll();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Splits every triangle in four (Ctrl+D)");
@@ -454,7 +433,7 @@ void materialPanel() {
       }
     ImGui::Separator();
     if (ImGui::Selectable("Image file...")) {
-      std::string file = openFileDialog(app.hwnd, kImageFilter);
+      std::string file = openFileDialog(windowsHost.hwnd, kImageFilter);
       if (!file.empty()) {
         m.matcap = file;
         app.modified = true;
@@ -615,97 +594,6 @@ constexpr ImGuiWindowFlags kOverlayFlags = ImGuiWindowFlags_NoDecoration | ImGui
                                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
                                            ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav;
 
-// The world axes as the camera sees them, top right in the view. Clicking an
-// axis looks at the model from that side.
-void axisGizmo() {
-  const ImGuiViewport* vp = ImGui::GetMainViewport();
-  const float s = ImGui::GetStyle().FontScaleDpi, size = 92 * s, pad = 8 * s;
-  ImGui::SetNextWindowPos(ImVec2(vp->Pos.x + app.viewX + app.viewW - size - pad, vp->Pos.y + app.viewY + pad));
-  ImGui::SetNextWindowSize(ImVec2(size, size));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-  if (ImGui::Begin("##axes", nullptr, kOverlayFlags | ImGuiWindowFlags_NoBackground)) {
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##axes", ImVec2(size, size));
-    const bool hovered = ImGui::IsItemHovered(), clicked = ImGui::IsItemClicked();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 c(p.x + size / 2, p.y + size / 2);
-    const float reach = size * 0.33f, knob = size * 0.1f;
-    const Camera& cam = app.camera;
-    struct Axis {
-      Vec3 d;
-      ImU32 color;
-      const char* label;  // null: the negative end
-      float yaw, pitch;   // camera looking from this side
-      const char* tip;
-    };
-    const ImU32 red = IM_COL32(214, 92, 92, 255), green = IM_COL32(120, 190, 92, 255), blue = IM_COL32(92, 140, 228, 255);
-    const Axis axes[6] = {
-        {{1, 0, 0}, red, "X", kPi / 2, 0, "View from +X (right)"},
-        {{-1, 0, 0}, red, nullptr, -kPi / 2, 0, "View from -X (left)"},
-        {{0, 1, 0}, green, "Y", cam.yaw, 1.5f, "View from +Y (top)"},
-        {{0, -1, 0}, green, nullptr, cam.yaw, -1.5f, "View from -Y (bottom)"},
-        {{0, 0, 1}, blue, "Z", 0, 0, "View from +Z (front)"},
-        {{0, 0, -1}, blue, nullptr, kPi, 0, "View from -Z (back)"},
-    };
-    ImVec2 at[6];
-    int order[6];
-    for (int k = 0; k < 6; ++k) {
-      at[k] = ImVec2(c.x + dot(axes[k].d, cam.right()) * reach, c.y - dot(axes[k].d, cam.up()) * reach);
-      order[k] = k;
-    }
-    // Far ends first, so the near ones draw over them.
-    std::sort(order, order + 6, [&](int a, int b) { return dot(axes[a].d, cam.forward()) > dot(axes[b].d, cam.forward()); });
-    int hit = -1;
-    if (hovered) {
-      const ImVec2 m = ImGui::GetMousePos();
-      for (int k : order) {  // the nearest end wins: it is drawn last
-        const float dx = m.x - at[k].x, dy = m.y - at[k].y;
-        if (dx * dx + dy * dy <= knob * knob) hit = k;
-      }
-      dl->AddCircleFilled(c, size * 0.48f, ImGui::GetColorU32(ImGuiCol_WindowBg, 0.6f));
-    }
-    for (int k : order) {
-      const Axis& a = axes[k];
-      if (a.label) {
-        dl->AddLine(c, at[k], a.color, 2 * s);
-        dl->AddCircleFilled(at[k], knob, a.color);
-        const ImVec2 ts = ImGui::CalcTextSize(a.label);
-        dl->AddText(ImVec2(at[k].x - ts.x / 2, at[k].y - ts.y / 2), IM_COL32(20, 20, 24, 255), a.label);
-      } else {
-        dl->AddCircleFilled(at[k], knob * 0.8f, (a.color & ~IM_COL32_A_MASK) | IM_COL32(0, 0, 0, 90));
-        dl->AddCircle(at[k], knob * 0.8f, a.color, 0, 1.5f * s);
-      }
-      if (k == hit) dl->AddCircle(at[k], knob + 2 * s, IM_COL32(255, 255, 255, 220), 0, 1.5f * s);
-    }
-    if (hit >= 0) {
-      ImGui::SetTooltip("%s", axes[hit].tip);
-      if (clicked) {
-        app.camera.yaw = axes[hit].yaw;
-        app.camera.pitch = axes[hit].pitch;
-      }
-    }
-  }
-  ImGui::End();
-  ImGui::PopStyleVar(2);
-}
-
-// An icon button for the view bar.
-bool viewButton(const char* id, Icon icon, bool selected, const char* tooltip) {
-  const float side = ImGui::GetFrameHeight() * 1.4f;
-  const ImVec2 p = ImGui::GetCursorScreenPos();
-  const bool clicked = ImGui::InvisibleButton(id, ImVec2(side, side));
-  const bool hovered = ImGui::IsItemHovered();
-  ImDrawList* dl = ImGui::GetWindowDrawList();
-  if (selected || hovered)
-    dl->AddRectFilled(p, ImVec2(p.x + side, p.y + side),
-                      ImGui::GetColorU32(selected ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered),
-                      ImGui::GetStyle().FrameRounding);
-  drawIcon(dl, icon, ImVec2(p.x + side / 2, p.y + side / 2), side * 0.6f, ImGui::GetColorU32(ImGuiCol_Text));
-  if (hovered && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tooltip);
-  return clicked;
-}
-
 // A small bar at the bottom of the view: frame the model, wireframe.
 void viewBar() {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -797,56 +685,6 @@ void dialogs() {
   }
 }
 
-void setStyle(float scale) {
-  ImGui::StyleColorsDark();
-  ImGuiStyle& s = ImGui::GetStyle();
-  s.WindowRounding = 0;
-  s.ChildRounding = s.FrameRounding = s.GrabRounding = s.PopupRounding = 5;
-  s.ScrollbarRounding = 5;
-  s.WindowBorderSize = 1;
-  s.PopupBorderSize = 1;
-  s.WindowPadding = ImVec2(12, 10);
-  s.FramePadding = ImVec2(8, 4);
-  s.ItemSpacing = ImVec2(8, 7);
-  s.ItemInnerSpacing = ImVec2(6, 4);
-  s.IndentSpacing = 16;
-  s.ScrollbarSize = 10;
-  s.GrabMinSize = 10;
-  s.SeparatorTextBorderSize = 1;
-  s.SeparatorTextPadding = ImVec2(0, 4);
-  ImVec4* c = s.Colors;
-  // Neutral slate grays; amber marks what is selected or active (the tool,
-  // the mode, the material layer) and the values of sliders and checkboxes.
-  const ImVec4 accent(0.86f, 0.62f, 0.25f, 1.0f), accentDim(0.55f, 0.4f, 0.17f, 1.0f);
-  c[ImGuiCol_Text] = ImVec4(0.9f, 0.9f, 0.88f, 1.0f);
-  c[ImGuiCol_TextDisabled] = ImVec4(0.55f, 0.56f, 0.6f, 1.0f);
-  c[ImGuiCol_WindowBg] = ImVec4(0.115f, 0.12f, 0.135f, 1.0f);
-  c[ImGuiCol_MenuBarBg] = ImVec4(0.085f, 0.09f, 0.1f, 1.0f);
-  c[ImGuiCol_PopupBg] = ImVec4(0.13f, 0.135f, 0.155f, 0.98f);
-  c[ImGuiCol_Border] = ImVec4(0.06f, 0.065f, 0.075f, 1.0f);
-  c[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.19f, 0.215f, 1.0f);
-  c[ImGuiCol_FrameBgHovered] = ImVec4(0.23f, 0.24f, 0.275f, 1.0f);
-  c[ImGuiCol_FrameBgActive] = ImVec4(0.27f, 0.28f, 0.32f, 1.0f);
-  c[ImGuiCol_Button] = ImVec4(0.19f, 0.2f, 0.23f, 1.0f);
-  c[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.27f, 0.31f, 1.0f);
-  c[ImGuiCol_ButtonActive] = accentDim;
-  c[ImGuiCol_Header] = ImVec4(0.17f, 0.18f, 0.205f, 1.0f);
-  c[ImGuiCol_HeaderHovered] = ImVec4(0.23f, 0.24f, 0.275f, 1.0f);
-  c[ImGuiCol_HeaderActive] = ImVec4(0.27f, 0.28f, 0.32f, 1.0f);
-  c[ImGuiCol_SliderGrab] = accent;
-  c[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.75f, 0.35f, 1.0f);
-  c[ImGuiCol_CheckMark] = accent;
-  c[ImGuiCol_TitleBg] = c[ImGuiCol_TitleBgActive] = c[ImGuiCol_MenuBarBg];
-  c[ImGuiCol_Separator] = ImVec4(0.24f, 0.25f, 0.28f, 1.0f);
-  c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
-  c[ImGuiCol_ScrollbarGrab] = ImVec4(0.24f, 0.25f, 0.28f, 1.0f);
-  c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.3f, 0.31f, 0.35f, 1.0f);
-  c[ImGuiCol_ScrollbarGrabActive] = accentDim;
-  c[ImGuiCol_ResizeGrip] = ImVec4(0, 0, 0, 0);
-  s.ScaleAllSizes(scale);
-  s.FontScaleDpi = scale;
-}
-
 }  // namespace
 
 void initUi(HWND hwnd) {
@@ -859,7 +697,7 @@ void initUi(HWND hwnd) {
     std::string font = std::string(fonts) + "\\Fonts\\segoeui.ttf";
     if (GetFileAttributesA(font.c_str()) != INVALID_FILE_ATTRIBUTES) io.Fonts->AddFontFromFileTTF(font.c_str(), 16.0f);
   }
-  setStyle(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));
+  applyStyle(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));
   ImGui_ImplWin32_Init(hwnd);
   ImGui_ImplOpenGL2_Init();
 }
@@ -893,7 +731,11 @@ void drawUi() {
   menuBar();
   toolStrip();
   panels();
-  axisGizmo();
+  {
+    const float s = ImGui::GetStyle().FontScaleDpi, size = 92 * s, pad = 8 * s;
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    axisGizmo(ImVec2(vp->Pos.x + app.viewX + app.viewW - size - pad, vp->Pos.y + app.viewY + pad), size);
+  }
   viewBar();
   statusBar();
   dialogs();
