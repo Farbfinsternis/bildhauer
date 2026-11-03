@@ -64,6 +64,7 @@ if(WIN32)
     src/app/snapshot.cpp
     src/app/ui.cpp
     src/app/widgets.cpp
+    src/app/bildhauer.rc
   )
   target_link_libraries(bildhauer PRIVATE bildhauer_core imgui opengl32 comdlg32 windowscodecs ole32 dwmapi)
   target_compile_definitions(bildhauer PRIVATE WIN32_LEAN_AND_MEAN)

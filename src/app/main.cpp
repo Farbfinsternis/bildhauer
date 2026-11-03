@@ -86,13 +86,19 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 bool createWindow(HINSTANCE instance) {
-  WNDCLASSA wc{};
+  WNDCLASSEXA wc{};
+  wc.cbSize = sizeof wc;
   wc.style = CS_OWNDC;
   wc.lpfnWndProc = windowProc;
   wc.hInstance = instance;
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+  // The logo from bildhauer.rc, in the sizes the title bar and Alt+Tab want.
+  wc.hIcon = static_cast<HICON>(LoadImageA(instance, MAKEINTRESOURCEA(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                                           GetSystemMetrics(SM_CYICON), 0));
+  wc.hIconSm = static_cast<HICON>(LoadImageA(instance, MAKEINTRESOURCEA(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                             GetSystemMetrics(SM_CYSMICON), 0));
   wc.lpszClassName = "bildhauer";
-  RegisterClassA(&wc);
+  RegisterClassExA(&wc);
   windowsHost.hwnd = CreateWindowA("bildhauer", "bildhauer", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                            app.width, app.height, nullptr, nullptr, instance, nullptr);
   if (!windowsHost.hwnd) return false;

@@ -82,6 +82,13 @@ cmake --build build-release --target bildhauer
 The ZIP holds `bildhauer.exe`, `README.md`, `LICENSE.txt` and Dear ImGui's license
 as `LICENSE-imgui.txt`.
 
+### App icons
+
+Both apps use the logo `docs/bildhauer.png` as their icon. After changing it,
+run `powershell -File tools/make-icons.ps1`: it writes `src/app/bildhauer.ico`
+(embedded through `src/app/bildhauer.rc`) and the Android launcher icon
+layers in `android/app/src/main/res/mipmap-*`.
+
 ### Android tablet prototype
 
 The experimental Android build shares `src/core`, `src/io`, the document
