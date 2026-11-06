@@ -1,17 +1,64 @@
 #include "app/render.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "app/app.h"
 #include "app/gl2.h"
+#include "app/gpu_mesh.h"
 #include "app/matcaps.h"
 
 namespace bh::viewer {
 
 namespace {
+
+// The sculpt mesh stays in buffers on the graphics card, and the shader does
+// the matcap lookup and mask tint that drawMesh computes per vertex each frame.
+const char* kSculptVertexShader = R"(#version 120
+uniform float mirror;
+uniform vec3 cameraRight, cameraUp;
+varying vec2 matcapUv;
+varying vec3 tint;
+void main() {
+  vec3 flip = vec3(mirror, 1.0, 1.0);
+  vec3 n = gl_Normal * flip;
+  matcapUv = vec2(0.5 + 0.49 * dot(n, cameraRight), 0.5 + 0.49 * dot(n, cameraUp));
+  float weight = gl_MultiTexCoord0.x;
+  float shade = weight < 0.0 ? 0.5 : 0.35 + 0.65 * weight;
+  tint = vec3(shade, shade, weight >= 0.0 && weight < 1.0 ? shade * 0.8 : shade);
+  gl_Position = gl_ModelViewProjectionMatrix * vec4(gl_Vertex.xyz * flip, 1.0);
+})";
+
+const char* kSculptFragmentShader = R"(#version 120
+uniform sampler2D matcap;
+varying vec2 matcapUv;
+varying vec3 tint;
+void main() {
+  gl_FragColor = vec4(texture2D(matcap, matcapUv).rgb * tint, 1.0);
+})";
+
+GLuint sculptProgram = 0, sculptVertices = 0, sculptIndices = 0;  // 0: drawMesh instead
+GpuMesh gpu;
+size_t vertexCapacity = 0, indexCapacity = 0;
+
+// Sends what changed. The buffer grows ahead of the mesh, so that a stroke
+// adding triangles does not reallocate it each frame.
+template <class T>
+void send(GLenum target, GLuint buffer, const std::vector<T>& data, const std::vector<GpuRange>& ranges, size_t& capacity) {
+  using gl2::gl;
+  gl.BindBuffer(target, buffer);
+  if (data.size() > capacity) {
+    capacity = data.size() + data.size() / 4 + 1024;
+    gl.BufferData(target, ptrdiff_t(capacity * sizeof(T)), nullptr, gl2::kDynamicDraw);
+    gl.BufferSubData(target, 0, ptrdiff_t(data.size() * sizeof(T)), data.data());
+    return;
+  }
+  for (const GpuRange& r : ranges)
+    gl.BufferSubData(target, ptrdiff_t(r.first * sizeof(T)), ptrdiff_t(r.count * sizeof(T)), data.data() + r.first);
+}
 
 GLuint makeTexture(int w, int h, GLint internal, GLenum format, const void* data) {
   GLuint tex = 0;
@@ -84,6 +131,13 @@ void initPaintShader() {
   }
   app.paintShader = gl2::buildProgram(kPaintVertexShader, kPaintFragmentShader, "tangent", &err);
   if (!app.paintShader) app.status = "paint shader: " + err;
+  sculptProgram = gl2::buildProgram(kSculptVertexShader, kSculptFragmentShader, "unused", &err);
+  if (!sculptProgram) {
+    app.status = "sculpt shader: " + err;
+    return;
+  }
+  gl2::gl.GenBuffers(1, &sculptVertices);
+  gl2::gl.GenBuffers(1, &sculptIndices);
 }
 
 // Brings the textures up to date with the canvas: color and normal maps
@@ -212,6 +266,50 @@ void drawMesh(bool mirrored) {
   drawWireframe(idx);
   glDisableClientState(GL_VERTEX_ARRAY);
   glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+  glFrontFace(GL_CCW);
+}
+
+// The stored mesh and, when symmetric, its mirror image, from the buffers.
+void drawSculptBuffers() {
+  using gl2::gl;
+  gpu.update(app.mesh, false);
+  send(gl2::kArrayBuffer, sculptVertices, gpu.vertices, gpu.vertexRanges, vertexCapacity);
+  send(gl2::kElementArrayBuffer, sculptIndices, gpu.indices, gpu.indexRanges, indexCapacity);
+  const GLsizei stride = sizeof(GpuVertex), count = GLsizei(gpu.indices.size());
+  glEnableClientState(GL_VERTEX_ARRAY);
+  glEnableClientState(GL_NORMAL_ARRAY);
+  glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+  glVertexPointer(3, GL_FLOAT, stride, reinterpret_cast<const void*>(offsetof(GpuVertex, position)));
+  glNormalPointer(GL_FLOAT, stride, reinterpret_cast<const void*>(offsetof(GpuVertex, normal)));
+  glTexCoordPointer(1, GL_FLOAT, stride, reinterpret_cast<const void*>(offsetof(GpuVertex, weight)));
+  const Vec3 r = app.camera.right(), u = app.camera.up();
+  for (bool mirrored : {false, true}) {
+    if (mirrored && !app.mesh.symmetric) break;
+    glFrontFace(mirrored ? GL_CW : GL_CCW);
+    gl.UseProgram(sculptProgram);
+    gl.Uniform1i(gl.GetUniformLocation(sculptProgram, "matcap"), 0);
+    gl.Uniform1f(gl.GetUniformLocation(sculptProgram, "mirror"), mirrored ? -1.0f : 1.0f);
+    gl.Uniform3f(gl.GetUniformLocation(sculptProgram, "cameraRight"), r.x, r.y, r.z);
+    gl.Uniform3f(gl.GetUniformLocation(sculptProgram, "cameraUp"), u.x, u.y, u.z);
+    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, nullptr);
+    gl.UseProgram(0);
+    if (!app.wireframe) continue;
+    glPushMatrix();
+    if (mirrored) glScalef(-1, 1, 1);
+    glColor4f(0.1f, 0.1f, 0.12f, 0.35f);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    glEnable(GL_POLYGON_OFFSET_LINE);
+    glPolygonOffset(-1, -1);
+    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, nullptr);
+    glDisable(GL_POLYGON_OFFSET_LINE);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    glPopMatrix();
+  }
+  glDisableClientState(GL_VERTEX_ARRAY);
+  glDisableClientState(GL_NORMAL_ARRAY);
+  glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+  gl.BindBuffer(gl2::kArrayBuffer, 0);  // the UI draws from its own arrays
+  gl.BindBuffer(gl2::kElementArrayBuffer, 0);
   glFrontFace(GL_CCW);
 }
 
@@ -401,11 +499,13 @@ void renderScene() {
   } else {
     glBindTexture(GL_TEXTURE_2D, builtinMatcapTexture(app.sculptMatcap));
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    drawMesh(false);
-    if (app.mesh.symmetric) {
-      drawMesh(true);
-      drawSymmetryLine();
+    if (sculptProgram) {
+      drawSculptBuffers();
+    } else {
+      drawMesh(false);
+      if (app.mesh.symmetric) drawMesh(true);
     }
+    if (app.mesh.symmetric) drawSymmetryLine();
   }
   glDisable(GL_CULL_FACE);
   drawBrushCursor();

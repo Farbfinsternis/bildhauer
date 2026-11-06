@@ -72,6 +72,7 @@ void snapPlaneVertices(Mesh& mesh) {
     v.normal.x = v.refNormal.x = 0;
     v.normal = normalize(v.normal);
     v.refNormal = normalize(v.refNormal);
+    mesh.noteVertex(i);
   }
 }
 

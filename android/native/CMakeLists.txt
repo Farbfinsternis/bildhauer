@@ -13,6 +13,7 @@ target_compile_definitions(imgui_android PRIVATE IMGUI_IMPL_OPENGL_ES3)
 add_library(bildhauer_android SHARED
   ${BH_ROOT}/src/app/app.cpp
   ${BH_ROOT}/src/app/document.cpp
+  ${BH_ROOT}/src/app/gpu_mesh.cpp
   ${BH_ROOT}/src/app/interaction.cpp
   ${BH_ROOT}/src/app/matcaps.cpp
   ${BH_ROOT}/src/app/icons.cpp

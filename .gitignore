@@ -5,6 +5,7 @@ node_modules/
 # C++ build output
 build/
 build-release/
+build-android-bench/
 
 # Android local configuration and generated output
 .gradle/

@@ -599,9 +599,9 @@ extern "C" JNIEXPORT jint JNICALL
 Java_org_bildhauer_app_MainActivity_nativeFrame(JNIEnv*,jclass) {
   auto now=std::chrono::steady_clock::now();
   ImGuiIO& io=ImGui::GetIO(); io.DisplaySize={float(app.width),float(app.height)};
-  if (flushPendingStroke()) invalidateMobileGeometry();
+  flushPendingStroke();
   io.DeltaTime=std::clamp(std::chrono::duration<float>(now-lastFrame).count(),0.001f,0.1f); lastFrame=now;
-  if (!app.mesh.dirtyVertices.empty()) { beautifyPass(app.mesh); invalidateMobileGeometry(); }
+  if (!app.mesh.dirtyVertices.empty()) beautifyPass(app.mesh);
   if (savePending && !app.stroke && app.mesh.dirtyVertices.empty()) saveRecovery();
   ImGui_ImplOpenGL3_NewFrame(); ImGui::NewFrame();
   int action=mobileUi();
@@ -655,18 +655,76 @@ Java_org_bildhauer_app_MainActivity_nativePointer(JNIEnv*,jclass,jint action,jfl
       __android_log_print(ANDROID_LOG_INFO,"bildhauer",
           "%s: %d updates, tess %.1f / tool %.1f / geometry %.1f ms, worst %.1f ms",
           toolName(app.stroke->tool()),app.stroke->dabCount(),t.tessellate,t.tool,t.geometry,t.worstDab);
-      endStroke(); savePending = true; invalidateMobileGeometry();
+      endStroke(); savePending = true;
     }
     uiPointer=false; viewDrag=ViewDrag::Off;
     // A lifted finger leaves no brush ring behind; a pen's next hover brings it back.
     app.hover={};
   }
-  if (app.stroke) invalidateMobileGeometry();
+}
+
+// For tools/perf-bench.ps1: frame times on the real surface, without and with
+// the full geometry upload that every frame of a stroke pays.
+extern "C" JNIEXPORT void JNICALL
+Java_org_bildhauer_app_MainActivity_nativeBench(JNIEnv* env,jclass,jstring filename) {
+  std::string error;
+  if (!loadModel(text(env,filename),&error)) {
+    __android_log_print(ANDROID_LOG_ERROR,"bildhauer","Bench: %s",error.c_str());
+    return;
+  }
+  invalidateMobileGeometry();
+  renderMobileScene(); glFinish();
+  for (const bool upload : {false,true}) {
+    std::vector<double> ms;
+    for (int i=0;i<30;++i) {
+      if (upload) invalidateMobileGeometry();
+      const auto start=std::chrono::steady_clock::now();
+      renderMobileScene(); glFinish();
+      ms.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
+    }
+    std::sort(ms.begin(),ms.end());
+    __android_log_print(ANDROID_LOG_INFO,"bildhauer","Bench render upload=%d triangles=%d median=%.2f worst=%.2f",
+                        int(upload),app.mesh.numTriangles(),ms[ms.size()/2],ms.back());
+  }
+  // Whole frames of a stroke, phase by phase: as drawn (2), and with a full
+  // upload every frame (3) as the comparison.
+  const int y=app.viewY+app.viewH/2, x0=app.viewX+app.viewW*2/5, x1=app.viewX+app.viewW*3/5;
+  auto since=[](std::chrono::steady_clock::time_point t) {
+    return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t).count();
+  };
+  auto median=[](std::vector<double>& v) { std::sort(v.begin(),v.end()); return v.empty() ? 0.0 : v[v.size()/2]; };
+  for (const int mode : {2,3}) {
+    renderMobileScene(); glFinish();
+    std::vector<double> ms,brush,sync,draw;
+    beginStroke(x0,y,false,false,1);
+    for (int i=1;i<=40 && app.stroke;++i) {
+      const auto start=std::chrono::steady_clock::now();
+      moveStroke(x0+(x1-x0)*i/40,y,1);
+      if (!app.mesh.dirtyVertices.empty()) beautifyPass(app.mesh);
+      brush.push_back(since(start));
+      if (mode==3) invalidateMobileGeometry();
+      auto t=std::chrono::steady_clock::now();
+      syncMobileGeometry(); glFinish();
+      sync.push_back(since(t));
+      t=std::chrono::steady_clock::now();
+      renderMobileScene(); glFinish();
+      draw.push_back(since(t));
+      ms.push_back(since(start));
+    }
+    endStroke();
+    undoLast();
+    if (ms.empty()) continue;
+    const double b=median(brush),s=median(sync),d=median(draw),m=median(ms);
+    __android_log_print(ANDROID_LOG_INFO,"bildhauer","Bench render upload=%d triangles=%d median=%.2f worst=%.2f",
+                        mode,app.mesh.numTriangles(),m,ms.back());
+    __android_log_print(ANDROID_LOG_INFO,"bildhauer","Bench stroke mode=%d brush=%.2f sync=%.2f draw=%.2f",mode,b,s,d);
+  }
+  __android_log_print(ANDROID_LOG_INFO,"bildhauer","Bench done");
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_org_bildhauer_app_MainActivity_nativePause(JNIEnv*,jclass) {
-  if (flushPendingStroke()) invalidateMobileGeometry();
+  flushPendingStroke();
   endStroke(); uiPointer=false; viewDrag=ViewDrag::Off;
   if (ImGui::GetCurrentContext()) ImGui::GetIO().AddMouseButtonEvent(0,false);
   if (app.modified) saveRecovery();
@@ -674,7 +732,7 @@ Java_org_bildhauer_app_MainActivity_nativePause(JNIEnv*,jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_org_bildhauer_app_MainActivity_nativeFile(JNIEnv* env,jclass,jint action,jstring filename) {
-  if (flushPendingStroke()) invalidateMobileGeometry();
+  flushPendingStroke();
   endStroke();
   std::string path=text(env,filename),error;
   bool ok=false;

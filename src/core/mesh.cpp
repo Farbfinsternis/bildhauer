@@ -102,6 +102,7 @@ int Mesh::addTriangle(int a, int b, int c, const Vec3* orientHint) {
   Triangle& t = triangles_[ti];
   t.active = true;
   t.v = vs;
+  noteTriangle(ti);
   for (int k = 0; k < 3; ++k) {
     Vertex& v = vertices_[vs[k]];
     v.tris[v.numTris++] = ti;
@@ -156,6 +157,7 @@ void Mesh::removeTriangle(int ti, bool removeOrphans) {
     for (int v : t.v)
       if (vertices_[v].active && vertices_[v].numTris == 0 && vertices_[v].numEdges == 0) removeVertex(v);
   t.active = false;
+  noteTriangle(ti);
   freeTriangles_.push_back(ti);
   --numTriangles_;
 }
@@ -177,6 +179,7 @@ void Mesh::updateTriangle(Triangle& t) {
 }
 
 void Mesh::updateGeometry() {
+  changes_.markAll();
   if (symmetric)
     for (Vertex& v : vertices_)
       if (v.active && v.onSymmetryPlane) v.pos.x = v.refPos.x = 0;
@@ -191,7 +194,27 @@ void Mesh::updateGeometry() {
   }
 }
 
+bool Mesh::takeChanges(std::vector<int>& vertices, std::vector<int>& triangles) {
+  const bool all = changes_.all;
+  vertices.clear();
+  triangles.clear();
+  if (all) {
+    for (Vertex& v : vertices_) v.logged = false;
+    for (Triangle& t : triangles_) t.logged = false;
+    changes_.vertices.clear();
+    changes_.triangles.clear();
+    changes_.all = false;
+    return true;
+  }
+  vertices.swap(changes_.vertices);
+  triangles.swap(changes_.triangles);
+  for (int v : vertices) vertices_[v].logged = false;
+  for (int t : triangles) triangles_[t].logged = false;
+  return false;
+}
+
 void Mesh::setDirty(int v) {
+  noteVertex(v);
   Vertex& vx = vertices_[v];
   if (vx.dirty) return;
   vx.dirty = true;
@@ -215,6 +238,7 @@ void Mesh::updateGeometryAround(const std::vector<int>& verts) {
   for (int v : verts) {
     Vertex& vx = vertices_[v];
     if (!vx.active) continue;
+    noteVertex(v);
     if (symmetric && vx.onSymmetryPlane) vx.pos.x = vx.refPos.x = 0;
   }
   for (int v : verts) {
@@ -238,6 +262,7 @@ void Mesh::updateGeometryAround(const std::vector<int>& verts) {
     for (int i = 0; i < vx.numTris; ++i) sum += triangles_[vx.tris[i]].normal;
     if (symmetric && vx.onSymmetryPlane) sum.x = 0;
     vx.normal = normalize(sum);
+    noteVertex(v);
   }
 }
 

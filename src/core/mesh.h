@@ -22,6 +22,7 @@ struct Vertex {
   bool dirty = false;
   bool onSymmetryPlane = false;
   bool hidden = false;
+  bool logged = false;  // in the change log (Mesh::takeChanges)
   uint8_t relaxCountdown = 0;
   float weight = 1.0f;  // mask weight: 1 = editable, 0 = masked
   Vec3 pos, refPos;     // refPos: state at stroke start
@@ -45,6 +46,7 @@ struct Edge {
 
 struct Triangle {
   bool active = false;
+  bool logged = false;    // in the change log (Mesh::takeChanges)
   bool fileFlag = false;  // triangle flag from the .sc1 file
   std::array<int, 3> v{-1, -1, -1};
   std::array<int, 3> e{-1, -1, -1};  // e0 = (v0,v1), e1 = (v1,v2), e2 = (v2,v0)
@@ -88,6 +90,21 @@ class Mesh {
   // Clears every dirty flag and the list.
   void clearDirty();
 
+  // For a renderer that keeps a copy on the graphics card: code that writes a
+  // vertex's position, normal or weight notes it here, unless the vertex goes
+  // through setDirty or updateGeometryAround anyway.
+  void noteVertex(int v) {
+    if (changes_.all || vertices_[v].logged) return;
+    vertices_[v].logged = true;
+    changes_.vertices.push_back(v);
+  }
+  // Hands over the vertex and triangle slots changed since the last call.
+  // Returns true if everything counts as changed, as after updateGeometry or
+  // for a mesh that was copied or assigned: undo and loading need no call of
+  // their own. Until the first call everything counts as changed, so a mesh
+  // nobody draws logs nothing.
+  bool takeChanges(std::vector<int>& vertices, std::vector<int>& triangles);
+
   int vertexSlots() const { return int(vertices_.size()); }
   int edgeSlots() const { return int(edges_.size()); }
   int triangleSlots() const { return int(triangles_.size()); }
@@ -126,6 +143,28 @@ class Mesh {
   std::vector<int> dirtyVertices;
 
  private:
+  // A copied or assigned mesh differs from what a renderer holds, whatever the
+  // source's log said.
+  struct ChangeLog {
+    std::vector<int> vertices, triangles;
+    bool all = true;
+    ChangeLog() = default;
+    ChangeLog(const ChangeLog&) {}
+    ChangeLog(ChangeLog&&) noexcept {}
+    ChangeLog& operator=(const ChangeLog&) { markAll(); return *this; }
+    ChangeLog& operator=(ChangeLog&&) noexcept { markAll(); return *this; }
+    void markAll() {
+      all = true;
+      vertices.clear();
+      triangles.clear();
+    }
+  };
+
+  void noteTriangle(int t) {
+    if (changes_.all || triangles_[t].logged) return;
+    triangles_[t].logged = true;
+    changes_.triangles.push_back(t);
+  }
   int newEdge(int a, int b);
   void removeEdge(int e);
   void removeVertex(int v);
@@ -138,6 +177,7 @@ class Mesh {
   std::vector<uint32_t> triStamp_, vertStamp_;  // scratch for updateGeometryAround
   uint32_t stamp_ = 0;
   int numVertices_ = 0, numEdges_ = 0, numTriangles_ = 0;
+  ChangeLog changes_;
 };
 
 }  // namespace bh

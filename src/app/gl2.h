@@ -8,6 +8,7 @@
 
 #include <GL/gl.h>
 
+#include <cstddef>
 #include <string>
 
 namespace bh::gl2 {
@@ -18,6 +19,9 @@ constexpr GLenum kCompileStatus = 0x8B81;
 constexpr GLenum kLinkStatus = 0x8B82;
 constexpr GLenum kTexture0 = 0x84C0;
 constexpr GLenum kClampToEdge = 0x812F;
+constexpr GLenum kArrayBuffer = 0x8892;
+constexpr GLenum kElementArrayBuffer = 0x8893;
+constexpr GLenum kDynamicDraw = 0x88E8;
 
 struct Functions {
   GLuint(APIENTRY* CreateShader)(GLenum) = nullptr;
@@ -36,6 +40,11 @@ struct Functions {
   void(APIENTRY* Uniform1i)(GLint, GLint) = nullptr;
   void(APIENTRY* Uniform1f)(GLint, GLfloat) = nullptr;
   void(APIENTRY* Uniform2f)(GLint, GLfloat, GLfloat) = nullptr;
+  void(APIENTRY* Uniform3f)(GLint, GLfloat, GLfloat, GLfloat) = nullptr;
+  void(APIENTRY* GenBuffers)(GLsizei, GLuint*) = nullptr;
+  void(APIENTRY* BindBuffer)(GLenum, GLuint) = nullptr;
+  void(APIENTRY* BufferData)(GLenum, ptrdiff_t, const void*, GLenum) = nullptr;
+  void(APIENTRY* BufferSubData)(GLenum, ptrdiff_t, ptrdiff_t, const void*) = nullptr;
   void(APIENTRY* ActiveTexture)(GLenum) = nullptr;
   void(APIENTRY* VertexAttribPointer)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*) = nullptr;
   void(APIENTRY* EnableVertexAttribArray)(GLuint) = nullptr;

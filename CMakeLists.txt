@@ -55,6 +55,7 @@ if(WIN32)
     src/app/document.cpp
     src/platform/windows/document_commands.cpp
     src/app/gl2.cpp
+    src/app/gpu_mesh.cpp
     src/app/icons.cpp
     src/app/images.cpp
     src/app/input.cpp
@@ -75,6 +76,8 @@ if(ANDROID)
   if(BILDHAUER_BUILD_BENCHMARKS)
     add_executable(grab_bench tests/grab_bench.cpp)
     target_link_libraries(grab_bench PRIVATE bildhauer_core)
+    add_executable(perf_bench tests/perf_bench.cpp)
+    target_link_libraries(perf_bench PRIVATE bildhauer_core)
   endif()
   add_subdirectory(android/native)
   return() # Desktop test executables are built/run on the host.
@@ -100,6 +103,9 @@ add_executable(interaction_test
   src/app/interaction.cpp src/app/matcaps.cpp)
 target_link_libraries(interaction_test PRIVATE bildhauer_core)
 add_test(NAME interaction COMMAND interaction_test)
+add_executable(gpu_mesh_test tests/gpu_mesh_test.cpp src/app/gpu_mesh.cpp)
+target_link_libraries(gpu_mesh_test PRIVATE bildhauer_core)
+add_test(NAME gpu_mesh COMMAND gpu_mesh_test)
 add_executable(grab_test tests/grab_test.cpp)
 target_link_libraries(grab_test PRIVATE bildhauer_core)
 add_test(NAME grab COMMAND grab_test)
@@ -131,3 +137,7 @@ add_test(NAME obj COMMAND obj_test ${BILDHAUER_SC1_SAMPLES})
 # Not a test: times strokes phase by phase (brush_bench <file.sc1>).
 add_executable(brush_bench tests/brush_bench.cpp)
 target_link_libraries(brush_bench PRIVATE bildhauer_core)
+
+# Not a test: what sculpting costs on a device (tools/perf-bench.ps1).
+add_executable(perf_bench tests/perf_bench.cpp)
+target_link_libraries(perf_bench PRIVATE bildhauer_core)

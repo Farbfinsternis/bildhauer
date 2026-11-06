@@ -39,6 +39,7 @@ void relaxTangential(Mesh& mesh, int v, float factor) {
   d -= vx.normal * dot(vx.normal, d);
   vx.pos += d * factor;
   if (vx.onSymmetryPlane) vx.pos.x = 0;
+  mesh.noteVertex(v);
 }
 
 void updateVertexNormal(Mesh& mesh, int v) {
@@ -47,6 +48,7 @@ void updateVertexNormal(Mesh& mesh, int v) {
   for (int i = 0; i < vx.numTris; ++i) sum += mesh.triangle(vx.tris[i]).normal;
   if (mesh.symmetric && vx.onSymmetryPlane) sum.x = 0;
   vx.normal = normalize(sum);
+  mesh.noteVertex(v);
 }
 
 int beautifyPass(Mesh& mesh) {

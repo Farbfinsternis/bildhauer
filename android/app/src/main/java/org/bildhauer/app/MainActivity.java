@@ -3,6 +3,7 @@ package org.bildhauer.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
@@ -39,6 +40,7 @@ public final class MainActivity extends Activity {
 
     private static native void nativePause();
     private static native String nativeFile(int action, String filename);
+    private static native void nativeBench(String filename);
 
     private SculptView view;
     private final ExecutorService files = Executors.newSingleThreadExecutor();
@@ -164,6 +166,9 @@ public final class MainActivity extends Activity {
         boolean ready;
         private int penId = -1;
         private long lastPen;
+        // tools/perf-bench.ps1 starts debug builds with this extra.
+        private boolean benchPending = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                && getIntent().getBooleanExtra("bench", false);
         // Frames continue this long after input so the UI can settle.
         private volatile long activeUntil;
         private final float density = getResources().getDisplayMetrics().density;
@@ -202,6 +207,10 @@ public final class MainActivity extends Activity {
             if (!ready) return;
             drainPen(true);
             int result = nativeFrame();
+            if (benchPending) {
+                benchPending = false;
+                nativeBench(new File(getFilesDir(), "bench.sc1").getAbsolutePath());
+            }
             int action = result & 0xff;
             if (action != 0) runOnUiThread(() -> chooseFile(action));
             if ((result & 0x100) != 0 || !penEvents.isEmpty() || SystemClock.uptimeMillis() < activeUntil) requestRender();

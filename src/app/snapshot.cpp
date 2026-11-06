@@ -14,6 +14,7 @@
 #include "app/input.h"
 #include "app/render.h"
 #include "app/ui.h"
+#include "core/relax.h"
 #include "io/obj.h"
 
 namespace bh::viewer {
@@ -136,19 +137,43 @@ int runSnapshot(const SnapshotOptions& o) {
     std::string err;
     if (!writeObj(o.exportObj, app.mesh, options, &err)) app.status = "export failed: " + err;
   }
-  if (o.frames > 0) {  // average frame time, written next to the snapshot
+  if (o.frames > 0) {  // frame times, written next to the snapshot
     LARGE_INTEGER f, t0, t1;
     QueryPerformanceFrequency(&f);
-    QueryPerformanceCounter(&t0);
+    std::vector<double> ms;
     for (int i = 0; i < o.frames; ++i) {
+      QueryPerformanceCounter(&t0);
       renderScene();
       glFinish();
+      QueryPerformanceCounter(&t1);
+      ms.push_back(double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart));
     }
-    QueryPerformanceCounter(&t1);
-    double ms = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart) / o.frames;
+    std::sort(ms.begin(), ms.end());
+    // Then whole frames of a stroke: brush, cleanup, upload and drawing.
+    std::vector<double> stroke;
+    if (!app.paintMode) {
+      layoutView(o.ui);
+      const int y = app.viewY + app.viewH / 2, x0 = app.viewX + app.viewW * 2 / 5, x1 = app.viewX + app.viewW * 3 / 5;
+      beginStroke(x0, y, false, false, 1);
+      for (int i = 1; i <= 40 && app.stroke; ++i) {
+        QueryPerformanceCounter(&t0);
+        moveStroke(x0 + (x1 - x0) * i / 40, y);
+        if (!app.mesh.dirtyVertices.empty()) beautifyPass(app.mesh);
+        renderScene();
+        glFinish();
+        QueryPerformanceCounter(&t1);
+        stroke.push_back(double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart));
+      }
+      endStroke();
+      undoLast();
+      std::sort(stroke.begin(), stroke.end());
+    }
     FILE* out = std::fopen((o.path + ".txt").c_str(), "w");
     if (out) {
-      std::fprintf(out, "%d triangles, %.2f ms per frame\n", app.mesh.numTriangles(), ms);
+      std::fprintf(out, "%d triangles, median %.2f, worst %.2f ms per frame\n", app.mesh.numTriangles(), ms[ms.size() / 2],
+                   ms.back());
+      if (!stroke.empty())
+        std::fprintf(out, "stroke median %.2f, worst %.2f ms per frame\n", stroke[stroke.size() / 2], stroke.back());
       std::fclose(out);
     }
   }

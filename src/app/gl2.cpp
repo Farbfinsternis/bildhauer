@@ -45,6 +45,11 @@ bool load() {
   ok &= loadOne(gl.Uniform1i, "glUniform1i");
   ok &= loadOne(gl.Uniform1f, "glUniform1f");
   ok &= loadOne(gl.Uniform2f, "glUniform2f");
+  ok &= loadOne(gl.Uniform3f, "glUniform3f");
+  ok &= loadOne(gl.GenBuffers, "glGenBuffers");
+  ok &= loadOne(gl.BindBuffer, "glBindBuffer");
+  ok &= loadOne(gl.BufferData, "glBufferData");
+  ok &= loadOne(gl.BufferSubData, "glBufferSubData");
   ok &= loadOne(gl.ActiveTexture, "glActiveTexture");
   ok &= loadOne(gl.VertexAttribPointer, "glVertexAttribPointer");
   ok &= loadOne(gl.EnableVertexAttribArray, "glEnableVertexAttribArray");

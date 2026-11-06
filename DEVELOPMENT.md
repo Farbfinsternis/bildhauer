@@ -98,6 +98,31 @@ documented in [android/README.md](android/README.md). Platform-specific
 implementations live in `src/platform/windows` and `src/platform/android`.
 The Windows build remains available through the existing CMake commands.
 
+### Measuring performance
+
+`tools/perf-bench.ps1` measures the same model files on the PC and on an
+Android device: every brush at three sizes, the undo copy, loading, saving,
+peak memory and frame times. It simulates no input. The results go to
+`build/perf/results.csv` and `build/perf/render.csv`.
+
+```powershell
+.\tools\perf-bench.ps1 -Device pc -Model my.sc1
+.\tools\perf-bench.ps1 -Device android -Serial <adb-serial> -Model my.sc1
+```
+
+The Android device needs a debug build of the app installed, and its screen
+on and unlocked. `-Model` adds a real model. Do not leave it out: generated
+spheres spread their triangles evenly, while a sculpted model is dense where
+the brush works, and a stroke on it costs several times as much at the same
+triangle count. A stroke first and last on each model (`canary` rows) shows
+whether the device throttled. `-RenderOnly` measures only the frame times on
+Android and prints a stroke frame phase by phase.
+
+Both renderers keep the sculpt mesh in buffers on the graphics card and send
+only what a stroke changed (`src/app/gpu_mesh.*`, `tests/gpu_mesh_test.cpp`).
+Without OpenGL 2.0 the Windows viewer falls back to `drawMesh` in
+`src/app/render.cpp`, which rebuilds its arrays every frame.
+
 ### Running the Windows viewer
 
 ```bat

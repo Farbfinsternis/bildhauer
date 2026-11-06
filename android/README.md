@@ -62,6 +62,11 @@ keystore to allow installation of updates without uninstalling the app.
   one, so slow brushes on large meshes cannot build an ever-growing lag.
 - The view renders on input and while a stroke, mesh cleanup or recovery save
   is pending, then stops for an idle tablet instead of drawing continuously.
+- A stroke uploads only what it changed: the mesh logs changed vertices and
+  triangles (`Mesh::takeChanges`), and `src/app/gpu_mesh.*` keeps them at fixed
+  places in the buffers. Any code that writes a vertex without going through
+  `setDirty` or `updateGeometryAround` must call `noteVertex`; `gpu_mesh_test`
+  compares the result with a full rebuild after every frame of every brush.
 - Grab accepts these samples cheaply and applies its latest target once per
   frame. Release, pause and file operations flush the final target even if no
   frame intervened. Other brushes retain their full movement history.

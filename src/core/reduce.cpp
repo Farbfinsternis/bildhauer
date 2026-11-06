@@ -93,6 +93,7 @@ int collapseEdge(Mesh& mesh, int e) {
   mesh.removeIsolatedVertex(v2);
 
   mesh.vertex(v1).pos = mid;
+  mesh.noteVertex(v1);
   // The vertex order already carries the orientation; an orientation check
   // against the old normal (Sculptris) would turn a folded triangle against
   // its neighbors.
@@ -113,7 +114,10 @@ int collapseEdge(Mesh& mesh, int e) {
   for (int v : ring)
     if (!isBoundaryVertex(mesh, v)) relaxTangential(mesh, v, 0.7f);
   for (int v : ring)
-    if (mesh.vertex(v).onSymmetryPlane) mesh.vertex(v).pos.x = 0;
+    if (mesh.vertex(v).onSymmetryPlane) {
+      mesh.vertex(v).pos.x = 0;
+      mesh.noteVertex(v);
+    }
   mesh.vertex(v1).relaxCountdown = 10;
   markDirty(mesh, v1);
   return v1;

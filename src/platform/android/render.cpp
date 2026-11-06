@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "app/app.h"
+#include "app/gpu_mesh.h"
 #include "app/matcaps.h"
 
 namespace bh::viewer {
@@ -16,12 +17,14 @@ namespace {
 
 GLuint program = 0, vao = 0, vertices = 0, triangles = 0, lines = 0, cursor = 0, cursorVao = 0;
 GLsizei triangleCount = 0, lineCount = 0;
-bool geometryDirty = true;
+GpuMesh gpu;
+size_t vertexCapacity = 0, indexCapacity = 0;
+// geometryDirty renews everything; otherwise the mesh reports what changed.
+bool geometryDirty = true, linesDirty = true;
 // One texture per built-in matcap; the choice survives a lost GL context.
 std::vector<GLuint> matcaps;
 int currentMatcap = -1;
 float density = 1;  // pixels per dp
-struct GpuVertex { Vec3 position, normal; float weight; };
 
 GLuint shader(GLenum type, const char* source) {
   GLuint id = glCreateShader(type);
@@ -37,32 +40,40 @@ GLuint shader(GLenum type, const char* source) {
   return id;
 }
 
-void uploadGeometry() {
+// Sends what changed. The buffer grows ahead of the mesh, so that a stroke
+// adding triangles does not reallocate it each frame.
+template <class T>
+void send(GLenum target, GLuint buffer, const std::vector<T>& data, const std::vector<GpuRange>& ranges, size_t& capacity) {
+  glBindBuffer(target, buffer);
+  if (data.size() > capacity) {
+    capacity = data.size() + data.size() / 4 + 1024;
+    glBufferData(target, GLsizeiptr(capacity * sizeof(T)), nullptr, GL_DYNAMIC_DRAW);
+    glBufferSubData(target, 0, GLsizeiptr(data.size() * sizeof(T)), data.data());
+    return;
+  }
+  for (const GpuRange& r : ranges)
+    glBufferSubData(target, GLintptr(r.first * sizeof(T)), GLsizeiptr(r.count * sizeof(T)), data.data() + r.first);
+}
+
+void syncGeometry() {
+  gpu.update(app.mesh, geometryDirty);
+  geometryDirty = false;
+  linesDirty |= gpu.topologyChanged;
+  glBindVertexArray(vao);
+  send(GL_ARRAY_BUFFER, vertices, gpu.vertices, gpu.vertexRanges, vertexCapacity);
+  send(GL_ELEMENT_ARRAY_BUFFER, triangles, gpu.indices, gpu.indexRanges, indexCapacity);
+  triangleCount = GLsizei(gpu.indices.size());
+  if (!app.wireframe || !linesDirty) return;
   const Mesh& m = app.mesh;
-  std::vector<GpuVertex> v(size_t(m.vertexSlots()));
-  std::vector<uint32_t> indices, edges;
-  for (int i = 0; i < m.vertexSlots(); ++i) {
-    const Vertex& p = m.vertex(i);
-    if (p.active) v[i] = {p.pos, p.normal, p.hidden ? 0.0f : p.weight};
-  }
-  for (int i = 0; i < m.triangleSlots(); ++i) {
-    const Triangle& t = m.triangle(i);
-    if (t.active) for (int p : t.v) indices.push_back(uint32_t(p));
-  }
+  std::vector<uint32_t> edges;
   for (int i = 0; i < m.edgeSlots(); ++i) {
     const Edge& e = m.edge(i);
     if (e.active && !e.quadDiagonal) { edges.push_back(uint32_t(e.v[0])); edges.push_back(uint32_t(e.v[1])); }
   }
-  glBindVertexArray(vao);
-  glBindBuffer(GL_ARRAY_BUFFER, vertices);
-  glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(v.size() * sizeof(GpuVertex)), v.data(), GL_DYNAMIC_DRAW);
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, triangles);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(indices.size() * sizeof(uint32_t)), indices.data(), GL_DYNAMIC_DRAW);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, lines);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(edges.size() * sizeof(uint32_t)), edges.data(), GL_DYNAMIC_DRAW);
-  triangleCount = GLsizei(indices.size());
   lineCount = GLsizei(edges.size());
-  geometryDirty = false;
+  linesDirty = false;
 }
 
 void drawHalf(float mirror) {
@@ -84,6 +95,7 @@ void drawHalf(float mirror) {
 }  // namespace
 
 void invalidateMobileGeometry() { geometryDirty = true; }
+void syncMobileGeometry() { syncGeometry(); }
 void setMobileDensity(float pixelsPerDp) { density = pixelsPerDp; }
 
 int mobileMatcapCount() { return int(matcaps.size()); }
@@ -104,7 +116,7 @@ out float maskWeight, worldX;
 void main() {
   vec3 p = position * vec3(mirror, 1, 1);
   n = mat3(view) * (normal * vec3(mirror, 1, 1));
-  maskWeight = weight;
+  maskWeight = max(weight, 0.0);
   worldX = p.x;
   gl_Position = projection * view * vec4(p, 1);
 })";
@@ -163,7 +175,8 @@ void main() {
     currentMatcap = int(std::find(names.begin(), names.end(), "bildhauer:redwax") - names.begin()) % int(names.size());
   app.matcap = matcaps[size_t(currentMatcap)];
   glBindVertexArray(0);
-  geometryDirty = true;
+  geometryDirty = linesDirty = true;
+  vertexCapacity = indexCapacity = 0;  // the buffers are new
   __android_log_print(ANDROID_LOG_INFO, "bildhauer", "OpenGL ES: %s", glGetString(GL_VERSION));
 }
 
@@ -178,7 +191,7 @@ void renderMobileScene() {
   float n = app.sceneSize * 0.01f, z = app.sceneSize * 50, cot = 1 / std::tan(kFov / 2);
   float aspect = float(app.viewW) / float(std::max(1, app.viewH));
   const float projection[16] = {cot/aspect,0,0,0, 0,cot,0,0, 0,0,-(z+n)/(z-n),-1, 0,0,-2*z*n/(z-n),0};
-  if (geometryDirty) uploadGeometry();
+  syncGeometry();
   glUseProgram(program);
   glUniformMatrix4fv(glGetUniformLocation(program,"view"),1,GL_FALSE,view);
   glUniformMatrix4fv(glGetUniformLocation(program,"projection"),1,GL_FALSE,projection);
