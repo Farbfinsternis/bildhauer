@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "core/mesh_tree.h"
 #include "core/vec3.h"
 
 namespace bh {
@@ -119,6 +120,13 @@ class Mesh {
   Triangle& triangle(int i) { return triangles_[i]; }
   const Triangle& triangle(int i) const { return triangles_[i]; }
 
+  // The bounding box tree, up to date; built on first use. Do not hold on to
+  // it across changes of the mesh.
+  const MeshTree& tree() const {
+    tree_.update(*this);
+    return tree_;
+  }
+
   // Reference state = current state (stroke start, Job_StoreReference).
   void storeReference();
 
@@ -178,6 +186,7 @@ class Mesh {
   uint32_t stamp_ = 0;
   int numVertices_ = 0, numEdges_ = 0, numTriangles_ = 0;
   ChangeLog changes_;
+  mutable MeshTree tree_;  // a cache of the geometry: reading the mesh may update it
 };
 
 }  // namespace bh

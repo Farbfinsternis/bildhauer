@@ -302,6 +302,11 @@ int main(int argc, char** argv) {
   report.row("undo", "copy", 0, timed(5, [&] { Mesh copy = base; }), 0, 0, 0, 0, 0, 0, 0,
              double(base.storageBytes()) / (1024 * 1024));
 
+  report.row("tree", "build", 0, timed(3, [&] {
+    base.updateGeometry();  // drops the tree
+    base.tree();
+  }), 0, 0, 0, 0, 0, 0, 0, double(base.storageBytes()) / (1024 * 1024));
+
   const Scene scene = frameOf(base);
   // The same stroke first and last: if the end is slower, the device has
   // throttled, and what lies between is not the code alone.

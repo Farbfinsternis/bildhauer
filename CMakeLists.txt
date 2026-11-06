@@ -20,6 +20,7 @@ endif()
 add_library(bildhauer_core
   src/core/brush.cpp
   src/core/mesh.cpp
+  src/core/mesh_tree.cpp
   src/core/paint.cpp
   src/core/pick.cpp
   src/core/reduce.cpp
@@ -106,6 +107,9 @@ add_test(NAME interaction COMMAND interaction_test)
 add_executable(gpu_mesh_test tests/gpu_mesh_test.cpp src/app/gpu_mesh.cpp)
 target_link_libraries(gpu_mesh_test PRIVATE bildhauer_core)
 add_test(NAME gpu_mesh COMMAND gpu_mesh_test)
+add_executable(mesh_tree_test tests/mesh_tree_test.cpp)
+target_link_libraries(mesh_tree_test PRIVATE bildhauer_core)
+add_test(NAME mesh_tree COMMAND mesh_tree_test)
 add_executable(grab_test tests/grab_test.cpp)
 target_link_libraries(grab_test PRIVATE bildhauer_core)
 add_test(NAME grab COMMAND grab_test)

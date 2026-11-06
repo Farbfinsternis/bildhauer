@@ -7,8 +7,8 @@
 // the caller runs one beautifyPass per frame while vertices are dirty.
 //
 // Deviations from Sculptris where the docs leave things open: the work region
-// is a sphere around the dab (twice the brush reach) instead of a box, and
-// Rotate turns by the horizontal mouse movement.
+// is a sphere around the dab (a little more than the brush reach) instead of a
+// box, and Rotate turns by the horizontal mouse movement.
 //
 // Deliberate deviation: symmetry compensation. Sculptris maps every dab onto
 // the stored half and halves both contributions where the brush overlaps its

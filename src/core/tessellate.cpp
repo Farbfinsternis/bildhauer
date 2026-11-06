@@ -69,8 +69,7 @@ int splitEdge(Mesh& mesh, int e) {
   return m;
 }
 
-int tessellateForBrush(Mesh& mesh, const BrushDetail& brush, const std::vector<int>* regionVertices,
-                       std::vector<int>* newVertices) {
+int tessellateForBrush(Mesh& mesh, const BrushDetail& brush, std::vector<int>* newVertices) {
   if (brush.detailFactor <= 0.15f) return 0;
   const float threshold = brush.detailSize / (2 * brush.scale) / brush.detailFactor;
 
@@ -106,28 +105,16 @@ int tessellateForBrush(Mesh& mesh, const BrushDetail& brush, const std::vector<i
     heap.push({mesh.edge(e).length, t, e});
   };
 
-  if (regionVertices) {
-    // Each triangle once, via a generation stamp that survives between calls.
-    static thread_local std::vector<uint32_t> stamp;
-    static thread_local uint32_t generation = 0;
-    if (++generation == 0) {
-      std::fill(stamp.begin(), stamp.end(), 0);
-      generation = 1;
-    }
-    stamp.resize(mesh.triangleSlots(), 0);
-    for (int v : *regionVertices) {
-      const Vertex& vx = mesh.vertex(v);
-      if (!vx.active) continue;
-      for (int i = 0; i < vx.numTris; ++i) {
-        int t = vx.tris[i];
-        if (stamp[t] == generation) continue;
-        stamp[t] = generation;
-        push(t);
-      }
-    }
-  } else {
-    for (int t = 0; t < mesh.triangleSlots(); ++t) push(t);
-  }
+  // Only triangles within reach of the brush can be coarse. In slot order: the
+  // heap breaks ties by arrival, and the result must not depend on how the
+  // tree happens to be laid out.
+  std::vector<int> candidates;
+  mesh.tree().sphere(brush.center, brush.radius, true, [&](const std::vector<int>& triangles) {
+    for (int t : triangles)
+      if (coarse(t)) candidates.push_back(t);
+  });
+  std::sort(candidates.begin(), candidates.end());
+  for (int t : candidates) push(t);
 
   int splits = 0;
   while (splits < brush.maxSplits && !heap.empty()) {

@@ -143,6 +143,7 @@ bool loadModel(const std::string& path, std::string* error) {
     }
   }
   frameModel();
+  app.mesh.tree();  // built now, not under the first touch
   return true;
 }
 

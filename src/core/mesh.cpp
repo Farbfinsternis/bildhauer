@@ -8,7 +8,7 @@ size_t Mesh::storageBytes() const {
   return sizeof(Mesh) + vertices_.capacity() * sizeof(Vertex) + edges_.capacity() * sizeof(Edge) +
          triangles_.capacity() * sizeof(Triangle) +
          (freeVertices_.capacity() + freeEdges_.capacity() + freeTriangles_.capacity() + dirtyVertices.capacity()) * sizeof(int) +
-         (triStamp_.capacity() + vertStamp_.capacity()) * sizeof(uint32_t) + quadMarkers.capacity();
+         (triStamp_.capacity() + vertStamp_.capacity()) * sizeof(uint32_t) + quadMarkers.capacity() + tree_.storageBytes();
 }
 
 namespace {
@@ -103,6 +103,7 @@ int Mesh::addTriangle(int a, int b, int c, const Vec3* orientHint) {
   t.active = true;
   t.v = vs;
   noteTriangle(ti);
+  tree_.triangleAdded(ti);
   for (int k = 0; k < 3; ++k) {
     Vertex& v = vertices_[vs[k]];
     v.tris[v.numTris++] = ti;
@@ -158,6 +159,7 @@ void Mesh::removeTriangle(int ti, bool removeOrphans) {
       if (vertices_[v].active && vertices_[v].numTris == 0 && vertices_[v].numEdges == 0) removeVertex(v);
   t.active = false;
   noteTriangle(ti);
+  tree_.triangleRemoved(ti);
   freeTriangles_.push_back(ti);
   --numTriangles_;
 }
@@ -176,10 +178,14 @@ void Mesh::updateTriangle(Triangle& t) {
     longest = std::max(longest, edge.length);
   }
   t.size = 3.0f * longest;
+  const Vec3 lo{std::min({p0.x, p1.x, p2.x}), std::min({p0.y, p1.y, p2.y}), std::min({p0.z, p1.z, p2.z})};
+  const Vec3 hi{std::max({p0.x, p1.x, p2.x}), std::max({p0.y, p1.y, p2.y}), std::max({p0.z, p1.z, p2.z})};
+  tree_.triangleChanged(int(&t - triangles_.data()), lo, hi, t.radius);
 }
 
 void Mesh::updateGeometry() {
   changes_.markAll();
+  tree_.invalidate();
   if (symmetric)
     for (Vertex& v : vertices_)
       if (v.active && v.onSymmetryPlane) v.pos.x = v.refPos.x = 0;

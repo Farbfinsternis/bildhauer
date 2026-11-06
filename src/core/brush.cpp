@@ -63,20 +63,42 @@ void Stroke::updateRegion(const Vec3& c) {
   if (anchored && regionValid_) return;
   if (!all && regionValid_ && length(c - regionCenter_) + reach <= regionRadius_) return;
   regionCenter_ = anchored ? grabOrigin_ : c;
-  regionRadius_ = 2 * reach;
+  // Every tool loop of every dab runs over the region, so it stays close to the
+  // reach; the tree makes rebuilding it cheap. A dense mesh would otherwise
+  // cost ten times what lies under the brush.
+  regionRadius_ = (anchored ? 2.0f : 1.25f) * reach;
   regionValid_ = !all;
+  for (int v : region_) inRegion_[v] = 0;
   region_.clear();
-  inRegion_.assign(mesh_.vertexSlots(), 0);
+  inRegion_.resize(mesh_.vertexSlots(), 0);
   const Vec3 cm = mirrorX(regionCenter_);
-  for (int v = 0; v < mesh_.vertexSlots(); ++v) {
-    const Vertex& vx = mesh_.vertex(v);
-    if (!vx.active) continue;
-    const Vec3 p = anchored ? vx.refPos : vx.pos;
-    if (all || length(p - regionCenter_) < regionRadius_ || (mesh_.symmetric && length(p - cm) < regionRadius_)) {
-      region_.push_back(v);
-      inRegion_[v] = 1;
+  if (all || anchored) {  // the anchored region is defined by the reference positions
+    for (int v = 0; v < mesh_.vertexSlots(); ++v) {
+      const Vertex& vx = mesh_.vertex(v);
+      if (!vx.active) continue;
+      const Vec3 p = anchored ? vx.refPos : vx.pos;
+      if (all || length(p - regionCenter_) < regionRadius_ || (mesh_.symmetric && length(p - cm) < regionRadius_)) {
+        region_.push_back(v);
+        inRegion_[v] = 1;
+      }
     }
+    return;
   }
+  auto collect = [&](const Vec3& center) {
+    mesh_.tree().sphere(center, regionRadius_, false, [&](const std::vector<int>& triangles) {
+      for (int t : triangles)
+        for (int v : mesh_.triangle(t).v)
+          if (!inRegion_[v] && length(mesh_.vertex(v).pos - center) < regionRadius_) {
+            inRegion_[v] = 1;
+            region_.push_back(v);
+          }
+    });
+  };
+  collect(regionCenter_);
+  if (mesh_.symmetric) collect(cm);
+  // In slot order, as a scan of the mesh gives it: Smooth moves vertices in
+  // place, so its result depends on the order.
+  std::sort(region_.begin(), region_.end());
 }
 
 Vec3 Stroke::dragPoint(const StrokeInput& in) const {
@@ -117,11 +139,11 @@ float Stroke::covered(int v, float f, bool mirrorSide) {
 }
 
 void Stroke::inheritCoverage(const std::vector<int>& created) {
-  if (coverDirect_.empty()) return;
+  if (coverDirect_.empty() || created.empty()) return;
   coverDirect_.resize(mesh_.vertexSlots(), 0);
   coverMirror_.resize(mesh_.vertexSlots(), 0);
-  std::vector<char> isNew(mesh_.vertexSlots(), 0);
-  for (int v : created) isNew[v] = 1;
+  std::vector<int> fresh = created;
+  std::sort(fresh.begin(), fresh.end());
   // A split vertex lies between covered vertices; starting it at zero would
   // let the next dabs raise it above its neighbors.
   for (int v : created) {
@@ -130,7 +152,7 @@ void Stroke::inheritCoverage(const std::vector<int>& created) {
     int n = 0;
     for (int i = 0; i < vx.numEdges; ++i) {
       int o = mesh_.edge(vx.edges[i]).other(v);
-      if (isNew[o]) continue;
+      if (std::binary_search(fresh.begin(), fresh.end(), o)) continue;
       d += coverDirect_[o];
       m += coverMirror_[o];
       ++n;
@@ -212,7 +234,7 @@ void Stroke::dab(Vec3 c, const StrokeInput& in) {
     detail.detailFactor = s_.detailFactor;
     detail.beautify = false;  // the caller runs beautify once per frame
     std::vector<int> created;
-    tessellateForBrush(mesh_, detail, &region_, &created);
+    tessellateForBrush(mesh_, detail, &created);
     if (tool == Tool::Grab) geometryVertices_.insert(geometryVertices_.end(), created.begin(), created.end());
     inheritCoverage(created);
     inRegion_.resize(mesh_.vertexSlots(), 0);
@@ -695,7 +717,7 @@ void Stroke::reduce(const Vec3& c) {
     detail.scale = std::fabs(s);
     detail.beautify = false;
     std::vector<int> created;
-    tessellateForBrush(mesh_, detail, &region_, &created);
+    tessellateForBrush(mesh_, detail, &created);
     inheritCoverage(created);
     inRegion_.resize(mesh_.vertexSlots(), 0);
     for (int v : created)

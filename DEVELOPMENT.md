@@ -118,6 +118,11 @@ triangle count. A stroke first and last on each model (`canary` rows) shows
 whether the device throttled. `-RenderOnly` measures only the frame times on
 Android and prints a stroke frame phase by phase.
 
+Picking and the brushes search a bounding box tree over the triangles
+(`src/core/mesh_tree.*`, `tests/mesh_tree_test.cpp`), so that they cost what
+lies under the brush, not what the model holds. The mesh keeps it up to date,
+and it is copied along with the mesh.
+
 Both renderers keep the sculpt mesh in buffers on the graphics card and send
 only what a stroke changed (`src/app/gpu_mesh.*`, `tests/gpu_mesh_test.cpp`).
 Without OpenGL 2.0 the Windows viewer falls back to `drawMesh` in

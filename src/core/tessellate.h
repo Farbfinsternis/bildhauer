@@ -29,10 +29,8 @@ struct BrushDetail {
 // Splits the longest splittable edge among the coarse triangles under the
 // brush until none is left (or maxSplits is reached), then runs one beautify
 // pass (if enabled). A triangle is coarse if size > detailSize / (2 s) / G.
-// Candidates come from the triangles of regionVertices if given (they must
-// cover the brush), otherwise from the whole mesh. New vertices are appended
-// to newVertices if given. Returns the number of splits.
-int tessellateForBrush(Mesh& mesh, const BrushDetail& brush, const std::vector<int>* regionVertices = nullptr,
-                       std::vector<int>* newVertices = nullptr);
+// New vertices are appended to newVertices if given. Returns the number of
+// splits.
+int tessellateForBrush(Mesh& mesh, const BrushDetail& brush, std::vector<int>* newVertices = nullptr);
 
 }  // namespace bh
