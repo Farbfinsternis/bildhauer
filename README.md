@@ -74,7 +74,9 @@ Tab with S Pen.
 
 - **Pen on the model:** sculpt. Pressing harder makes the brush stronger.
 - **Pen next to the model:** turn the view.
-- **One finger:** turn the view. **Two fingers:** move and zoom.
+- **Finger on the model:** sculpt, like the pen.
+- **Finger next to the model:** turn the view. Add a second finger to move
+  and zoom.
 - The tools are on the left. Size, strength and the other settings are in
   the bar at the top. Tap the small tab under the bar to fold it away and
   get more room.

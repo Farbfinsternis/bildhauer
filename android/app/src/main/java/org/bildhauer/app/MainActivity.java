@@ -33,9 +33,7 @@ public final class MainActivity extends Activity {
     private static native int nativeFrame();
     private static native void nativePointer(int action, float x, float y, float pressure, boolean button);
 
-    private static native void nativeCamera(float dx, float dy, float zoom, boolean pan);
     private static native void nativePause();
-    private static native boolean nativeUiAt(float x, float y);
     private static native String nativeFile(int action, String filename);
 
     private SculptView view;
@@ -153,14 +151,13 @@ public final class MainActivity extends Activity {
 
     private final class SculptView extends GLSurfaceView implements GLSurfaceView.Renderer {
         boolean ready;
-        private int penId = -1, fingerCount;
-        private boolean fingerUi;
-        private float lastX, lastY, lastSpan;
+        private int penId = -1;
         private long lastPen;
         // Frames continue this long after input so the UI can settle.
         private volatile long activeUntil;
         private final float density = getResources().getDisplayMetrics().density;
         private final PenEventQueue penEvents=new PenEventQueue();
+        private final FingerGesture fingers=new FingerGesture(this::pointer);
         SculptView() {
             super(MainActivity.this);
             setEGLContextClientVersion(3);
@@ -218,8 +215,7 @@ public final class MainActivity extends Activity {
                 if (action!=MotionEvent.ACTION_MOVE)
                     Log.i("bildhauer","Pen contact action="+action+" id="+id+" pressure="+event.getPressure(pen));
                 if ((action==MotionEvent.ACTION_DOWN || action==MotionEvent.ACTION_POINTER_DOWN) && event.getActionIndex()==pen) {
-                    if (fingerUi) pointer(3,lastX,lastY,1,false);
-                    fingerUi=false; fingerCount=0; penId=id;
+                    fingers.cancel(); penId=id;
                     pointer(0,event.getX(pen),event.getY(pen),event.getPressure(pen),button);
                 } else if (action==MotionEvent.ACTION_MOVE && penId==id) {
                     for (int h=0;h<event.getHistorySize();++h)
@@ -228,39 +224,31 @@ public final class MainActivity extends Activity {
                 } else if (action==MotionEvent.ACTION_CANCEL ||
                         ((action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_POINTER_UP) && event.getActionIndex()==pen)) {
                     pointer(action==MotionEvent.ACTION_CANCEL ? 3 : 2,event.getX(pen),event.getY(pen),event.getPressure(pen),button);
-                    penId=-1; fingerCount=0;
+                    penId=-1;
                 }
                 return true; // Finger/palm events never sculpt while a pen is present.
             }
             if (action==MotionEvent.ACTION_CANCEL) {
-                pointer(3,0,0,0,false); penId=-1; fingerUi=false; fingerCount=0; return true;
+                fingers.cancel();
+                if (penId!=-1) { pointer(3,0,0,0,false); penId=-1; }
+                return true;
             }
-            if (penId!=-1 || SystemClock.uptimeMillis()-lastPen<400) return true;
-            int count=event.getPointerCount();
+            // A nearby pen means the hand is resting on the glass, not sculpting.
+            if (penId!=-1 || SystemClock.uptimeMillis()-lastPen<400) { fingers.cancel(); return true; }
+            final int index=event.getActionIndex();
             if (action==MotionEvent.ACTION_DOWN) {
-                lastX=event.getX(); lastY=event.getY(); fingerCount=1;
-                fingerUi=nativeUiAt(lastX,lastY);
-                if (fingerUi) pointer(0,lastX,lastY,1,false);
-            } else if (action==MotionEvent.ACTION_UP) {
-                if (fingerUi) pointer(2,event.getX(),event.getY(),1,false);
-                fingerUi=false; fingerCount=0;
-            } else if (action==MotionEvent.ACTION_POINTER_DOWN || action==MotionEvent.ACTION_POINTER_UP) {
-                if (fingerUi) pointer(3,lastX,lastY,1,false);
-                fingerUi=false; fingerCount=0; // Reset gesture baseline when pointer membership changes.
+                fingers.down(event.getPointerId(index),event.getX(index),event.getY(index));
+            } else if (action==MotionEvent.ACTION_POINTER_DOWN) {
+                fingers.added(event.getPointerId(index),event.getX(index),event.getY(index));
+            } else if (action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_POINTER_UP) {
+                fingers.lifted(event.getPointerId(index));
             } else if (action==MotionEvent.ACTION_MOVE) {
-                if (fingerUi && count==1) { pointer(1,event.getX(),event.getY(),1,false); return true; }
-                float x=event.getX(), y=event.getY(), span=0;
-                if (count>=2) {
-                    x=(event.getX(0)+event.getX(1))*0.5f; y=(event.getY(0)+event.getY(1))*0.5f;
-                    span=(float)Math.hypot(event.getX(0)-event.getX(1),event.getY(0)-event.getY(1));
-                }
-                if (fingerCount==count) {
-                    final float dx=x-lastX,dy=y-lastY,zoom=span>1 && lastSpan>1 ? lastSpan/span : 1;
-                    final boolean pan=count>=2;
-                    queueEvent(() -> { if (ready) nativeCamera(dx,dy,zoom,pan); });
-                    wake();
-                }
-                lastX=x; lastY=y; lastSpan=span; fingerCount=count;
+                final int count=event.getPointerCount();
+                for (int h=0;h<event.getHistorySize();++h)
+                    for (int i=0;i<count;++i)
+                        fingers.moved(event.getPointerId(i),event.getHistoricalX(i,h),event.getHistoricalY(i,h));
+                for (int i=0;i<count;++i) fingers.moved(event.getPointerId(i),event.getX(i),event.getY(i));
+                fingers.endOfEvent();
             }
             return true;
         }

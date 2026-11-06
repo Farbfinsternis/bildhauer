@@ -2,7 +2,6 @@
 #include <GLES3/gl3.h>
 #include <android/log.h>
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <cfloat>
 #include <chrono>
@@ -26,9 +25,15 @@ namespace bh::viewer {
 namespace {
 
 bool initialized = false, uiPointer = false, invert = false, smoothing = false, pressureOn = true;
-// Pen contact that started beside the model orbits the view, as in Sculptris.
-bool penOrbit = false;
-float orbitX = 0, orbitY = 0;
+// A contact that starts beside the model moves the view, as in Sculptris: it
+// orbits, and with a second finger it pans and zooms. Once one of the two
+// fingers lifts, the other one holds still until it lifts as well, so that
+// ending a pinch never swings the view around.
+enum class ViewDrag { Off, Orbit, Pinch, Held };
+ViewDrag viewDrag = ViewDrag::Off;
+float orbitX = 0, orbitY = 0, pinchX = 0, pinchY = 0, pinchSpan = 0;
+// Pointer actions beyond PenEventQueue's contact and hover samples.
+constexpr int kPinchStart = 6, kPinchMove = 7, kPinchEnd = 8;
 bool savePending = false;
 float density = 1;
 std::string recovery;
@@ -90,18 +95,17 @@ void materialPanel() {
   ImGui::EndPopup();
 }
 
-// Where the UI takes pointer input, for the pen here and for fingers in Java
-// (read on the UI thread, hence atomic): the tool strip left of the view, the
+// Where the UI takes pen and finger input: the tool strip left of the view, the
 // top bar and the view bar over it, and everything while a popup is open.
 struct UiRect {
-  std::atomic<float> x0{0}, y0{0}, x1{0}, y1{0};
+  float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
   void set(ImVec2 p, ImVec2 size) { x0 = p.x; y0 = p.y; x1 = p.x + size.x; y1 = p.y + size.y; }
   bool contains(float x, float y) const { return x >= x0 && x < x1 && y >= y0 && y < y1; }
 };
 struct UiRegions {
-  std::atomic<float> viewX{0};
+  float viewX = 0;
   UiRect top, tab, bar, axes;
-  std::atomic<bool> modal{false};
+  bool modal = false;
 } ui;
 
 bool uiAt(float x, float y) {
@@ -308,6 +312,25 @@ void statusText() {
   if (!app.status.empty()) dl->AddText({app.viewX + pad, app.viewH - pad - 2 * line}, dim, app.status.c_str());
 }
 
+// The second finger of a contact beside the model. It may land anywhere; on a
+// stroke or a UI control it does nothing.
+void pinchGesture(int action, float x, float y, float span) {
+  if (action == kPinchEnd) {
+    if (viewDrag == ViewDrag::Pinch) viewDrag = ViewDrag::Held;
+    return;
+  }
+  if (action == kPinchStart && viewDrag != ViewDrag::Off) viewDrag = ViewDrag::Pinch;
+  if (viewDrag != ViewDrag::Pinch) return;
+  if (action == kPinchMove) {
+    const float scale = app.camera.distance * 2 * std::tan(kFov / 2) / std::max(1, app.viewH);
+    app.camera.target += (app.camera.right() * (pinchX - x) + app.camera.up() * (y - pinchY)) * scale;
+    if (span > 1 && pinchSpan > 1)
+      app.camera.distance = std::clamp(app.camera.distance * pinchSpan / span, app.sceneSize * 0.15f, app.sceneSize * 30);
+  }
+  pinchX = x; pinchY = y; pinchSpan = span;
+  app.hover = {};
+}
+
 int mobileUi() {
   const float strip = 76 * density;
   app.viewX = int(strip); app.viewY = 0;
@@ -402,17 +425,21 @@ Java_org_bildhauer_app_MainActivity_nativeFrame(JNIEnv*,jclass) {
 extern "C" JNIEXPORT void JNICALL
 Java_org_bildhauer_app_MainActivity_nativePointer(JNIEnv*,jclass,jint action,jfloat x,jfloat y,jfloat pressure,jboolean button) {
   if (!ImGui::GetCurrentContext()) return;
+  // Pinch samples carry the fingers' center and, as pressure, their distance.
+  if (action>=kPinchStart) { pinchGesture(action,x,y,pressure); return; }
   ImGuiIO& io=ImGui::GetIO(); io.AddMousePosEvent(x,y);
   const float strength=pressureOn ? std::clamp(pressure,0.0f,1.0f) : 1;
   if (action==0) {
     uiPointer = uiAt(x,y) || ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId);
     if (uiPointer) io.AddMouseButtonEvent(0,true);
-    else if (!inputAt(int(x),int(y)).hit) { penOrbit=true; orbitX=x; orbitY=y; }
+    else if (!inputAt(int(x),int(y)).hit) { viewDrag=ViewDrag::Orbit; orbitX=x; orbitY=y; }
     else beginStroke(int(x),int(y),invert || button,smoothing,strength);
-  } else if (action==1 && penOrbit) {
-    app.camera.yaw-=(x-orbitX)*0.008f/density;
-    app.camera.pitch=std::clamp(app.camera.pitch+(y-orbitY)*0.008f/density,-1.5f,1.5f);
-    orbitX=x; orbitY=y; app.hover={};
+  } else if (action==1 && viewDrag!=ViewDrag::Off) {
+    if (viewDrag==ViewDrag::Orbit) {
+      app.camera.yaw-=(x-orbitX)*0.008f/density;
+      app.camera.pitch=std::clamp(app.camera.pitch+(y-orbitY)*0.008f/density,-1.5f,1.5f);
+      orbitX=x; orbitY=y; app.hover={};
+    }
   } else if (action==1) {
     if (!uiPointer && x >= app.viewX && !deferGrabMove(int(x),int(y),strength))
       moveStroke(int(x),int(y),strength);
@@ -436,30 +463,17 @@ Java_org_bildhauer_app_MainActivity_nativePointer(JNIEnv*,jclass,jint action,jfl
           toolName(app.stroke->tool()),app.stroke->dabCount(),t.tessellate,t.tool,t.geometry,t.worstDab);
       endStroke(); savePending = true; invalidateMobileGeometry();
     }
-    uiPointer=false; penOrbit=false;
-    if (action==3) app.hover={};
+    uiPointer=false; viewDrag=ViewDrag::Off;
+    // A lifted finger leaves no brush ring behind; a pen's next hover brings it back.
+    app.hover={};
   }
   if (app.stroke) invalidateMobileGeometry();
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_org_bildhauer_app_MainActivity_nativeCamera(JNIEnv*,jclass,jfloat dx,jfloat dy,jfloat zoom,jboolean pan) {
-  if (app.stroke) return;
-  if (pan) {
-    float scale=app.camera.distance*2*std::tan(kFov/2)/std::max(1,app.viewH);
-    app.camera.target+=(app.camera.right()*-dx+app.camera.up()*dy)*scale;
-  } else {
-    app.camera.yaw-=dx*0.008f/density;
-    app.camera.pitch=std::clamp(app.camera.pitch+dy*0.008f/density,-1.5f,1.5f);
-  }
-  app.camera.distance=std::clamp(app.camera.distance*zoom,app.sceneSize*0.15f,app.sceneSize*30);
-  app.hover={};
-}
-
-extern "C" JNIEXPORT void JNICALL
 Java_org_bildhauer_app_MainActivity_nativePause(JNIEnv*,jclass) {
   if (flushPendingStroke()) invalidateMobileGeometry();
-  endStroke(); uiPointer=false; penOrbit=false;
+  endStroke(); uiPointer=false; viewDrag=ViewDrag::Off;
   if (ImGui::GetCurrentContext()) ImGui::GetIO().AddMouseButtonEvent(0,false);
   if (app.modified) saveRecovery();
 }
@@ -484,10 +498,4 @@ Java_org_bildhauer_app_MainActivity_nativeFile(JNIEnv* env,jclass,jint action,js
   }
   app.status=ok ? (action==1 ? "Opened model" : "Snapshot ready to save") : error;
   return env->NewStringUTF(ok ? "" : error.c_str());
-}
-
-// For finger input on the UI thread: whether (x, y) belongs to the UI.
-extern "C" JNIEXPORT jboolean JNICALL
-Java_org_bildhauer_app_MainActivity_nativeUiAt(JNIEnv*,jclass,jfloat x,jfloat y) {
-  return uiAt(x,y) ? JNI_TRUE : JNI_FALSE;
 }

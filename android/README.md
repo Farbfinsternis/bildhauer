@@ -48,7 +48,12 @@ keystore to allow installation of updates without uninstalling the app.
 - S Pen: sculpt; pressure changes strength of surface brushes during the
   same stroke. Pen contact beside the model orbits the view.
 - Pen side button / eraser tool: invert for the stroke.
-- One finger on the model view: orbit; two fingers: pan and pinch zoom.
+- One finger on the model: sculpt, like the pen at full pressure.
+- One finger beside the model: orbit. A second finger, anywhere, turns that
+  into pan and pinch zoom. Once one of the two lifts, the view holds still
+  until the other lifts too. The first finger alone decides: a second finger
+  during a stroke or on a control does nothing. A model filling the whole view
+  leaves no room beside it; Frame in the view bar brings it back.
 - Contact recognition remains the same as the confirmed-working physical
   S Pen build. Raw samples enter a FIFO, including history, pressure,
   corners and down/up/cancel boundaries. The render thread processes them for
@@ -72,7 +77,11 @@ keystore to allow installation of updates without uninstalling the app.
 - Hover exit is independent of contact cancellation. Hover motion cannot
   change the pressure of a contacting stroke or terminate it.
 - Fingers also operate panel controls. Pen contacts own their stroke;
-  concurrent finger contacts do not sculpt or move the camera.
+  concurrent finger contacts do not sculpt or move the camera. Fingers, and so
+  a resting hand, are ignored while the pen touches or hovers and for 400 ms
+  after; a pen arriving during a finger contact ends that contact. Fingers go
+  through the pen's FIFO and hit test (`FingerGesture.java`), because only the
+  render thread can pick the mesh.
 - The UI follows the desktop app, compacted for the tablet: the shared theme
   and icon widgets (`src/app/widgets.*`) and a tool strip with all eleven
   tools. As in Sculptris, the brush settings lie in a translucent bar over
@@ -118,6 +127,9 @@ before the anchored Grab/view-plane correction and pass with it.
 input injection. Compile it together with `PenEventQueue.java`, then run
 `org.bildhauer.app.PenEventQueueTest`. It checks lossless history, pressure,
 corners, contact boundaries and concurrent production/consumption.
+`android/tests/FingerGestureTest.java` runs the same way, with
+`FingerGesture.java` added. It checks how finger contacts become samples:
+pinch center and distance, extra fingers, lifting order and cancellation.
 
 The Android smoke instrumentation injects stylus events with varying
 pressure through the actual Android input path. It checks mesh changes,
