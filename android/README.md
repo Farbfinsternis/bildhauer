@@ -99,7 +99,9 @@ keystore to allow installation of updates without uninstalling the app.
   at the top opens Detail, symmetry, the material, the menu and the tool's
   options. A tap beside an open panel only closes it. The panels open on a tap
   because swiping in from the edge belongs to Android, and the UI keeps clear
-  of a camera hole (`nativeInsets`). Pressure has no switch here; it stays on.
+  of a camera hole and the navigation bar (`nativeInsets`), which stays
+  visible: without hardware keys it is the way out of the app. Pressure has no
+  switch here; it stays on.
 - Material... opens a panel of the built-in matcaps, as in Sculptris. Red wax,
   fitted to the Sculptris default, is the start material. With symmetry on, a
   faint light line marks the mirror plane on the mesh.

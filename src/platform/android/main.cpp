@@ -41,7 +41,7 @@ constexpr float kPhoneDp = 600;
 bool phone = false;
 // What the phone layout folds away; a tap beside them closes them again.
 bool toolsOpen = false, settingsOpen = false;
-// The display cutout (camera hole) in pixels: the UI stays clear of it.
+// The camera hole and navigation bar in pixels: the UI stays clear of them.
 float insetLeft = 0, insetTop = 0, insetRight = 0, insetBottom = 0;
 std::string recovery;
 std::chrono::steady_clock::time_point lastFrame;

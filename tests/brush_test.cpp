@@ -182,6 +182,54 @@ void dabAt(Mesh& m, const BrushSettings& s, const Vec3& c) {
   Stroke stroke(m, s, in);
 }
 
+// A dense grid over x, y in [-1, 1]; the brush spans dozens of edges.
+template <class Height>
+Mesh denseGrid(Height height) {
+  Mesh m;
+  const int n = 240;
+  for (int j = 0; j <= n; ++j)
+    for (int i = 0; i <= n; ++i) {
+      const float x = -1 + 2.0f * i / n, y = -1 + 2.0f * j / n;
+      m.addVertex({x, y, height(x, y)});
+    }
+  for (int j = 0; j < n; ++j)
+    for (int i = 0; i < n; ++i) {
+      int a = j * (n + 1) + i, b = a + 1, c = a + n + 1, d = c + 1;
+      m.addTriangle(a, b, d);
+      m.addTriangle(a, d, c);
+    }
+  m.updateGeometry();
+  m.storeReference();
+  return m;
+}
+
+// Smooth must reach forms of the brush's size, however dense the mesh is, and
+// leave a plain curved surface alone.
+void testSmoothDenseMesh() {
+  BrushSettings s;
+  s.tool = Tool::Smooth;
+  s.radius = s.detailSize = 0.3f;
+  s.strength = brushStrength(1);
+  auto peak = [](const Mesh& m) {
+    float z = -1e9f;
+    for (int v = 0; v < m.vertexSlots(); ++v) z = std::max(z, m.vertex(v).pos.z);
+    return z;
+  };
+  Mesh hill = denseGrid([](float x, float y) { return 0.1f * std::exp(-(x * x + y * y) / (2 * 0.12f * 0.12f)); });
+  for (int i = 0; i < 12; ++i) dabAt(hill, s, {0, 0, peak(hill)});
+  check(peak(hill) < 0.06f, "Smooth flattens a hill on a dense mesh");
+
+  auto bowl = [](float x, float y) { return -0.4f * (x * x + y * y); };
+  Mesh round = denseGrid(bowl);
+  for (int i = 0; i < 12; ++i) dabAt(round, s, {0, 0, 0});
+  float moved = 0;
+  for (int v = 0; v < round.vertexSlots(); ++v) {
+    const Vec3 p = round.vertex(v).pos;
+    moved = std::max(moved, std::fabs(p.z - bowl(p.x, p.y)));
+  }
+  check(moved < 0.002f, "Smooth keeps a round form round");
+}
+
 // The brush mask (brushes.md 3.4) on a flat patch.
 void testBrushMask() {
   std::printf("brush mask\n");
@@ -437,6 +485,7 @@ int main(int argc, char** argv) {
   testSymmetricStroke();
   testBrushMask();
   testFlattenFacing();
+  testSmoothDenseMesh();
   for (int i = 1; i < argc; ++i) testFile(argv[i]);
   std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");
   return failures ? 1 : 0;

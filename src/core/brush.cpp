@@ -309,7 +309,86 @@ void Stroke::draw(const Vec3& c, bool mirror) {
   }
 }
 
+// Beyond Sculptris: its Smooth below only averages each vertex with its
+// neighbors, so its reach is one edge and fades as the mesh gets denser. On
+// half a million triangles a stroke at full strength moved the surface by
+// 0.03 % of the model. So first the surface under the brush is pulled toward a
+// curved fit of it, which works at the size of the brush on any mesh. Vertices
+// move along the fit's normal only, and the curvature keeps round forms round.
+void Stroke::smoothForm(const Vec3& c) {
+  const float r = s_.radius, s = std::fabs(s_.strength);
+  // The fit looks past the brush, so that a form of the brush's size is detail
+  // to it and not simply matched.
+  const float reach = 1.5f * r;
+  auto eachSample = [&](auto&& use) {
+    for (int v : region_) {
+      const Vertex& vx = mesh_.vertex(v);
+      if (!usable(vx)) continue;
+      const float d = length(vx.pos - c);
+      if (d < reach) use(vx.pos, vx.normal, (1 - d / reach) * (1 - d / reach));
+      if (mesh_.symmetric && !vx.onSymmetryPlane) {
+        const Vec3 p = mirrorX(vx.pos);
+        const float dm = length(p - c);
+        if (dm < reach) use(p, mirrorX(vx.normal), (1 - dm / reach) * (1 - dm / reach));
+      }
+    }
+  };
+  Vec3 origin, N;
+  float sumW = 0;
+  eachSample([&](const Vec3& p, const Vec3& n, float w) { origin += p * w; N += n * w; sumW += w; });
+  if (sumW <= 0 || length(N) < 1e-6f) return;
+  origin = origin / sumW;
+  N = normalize(N);
+  const Vec3 U = normalize(cross(N, std::fabs(N.x) < 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0})), V = cross(N, U);
+
+  // Least squares for the height h(x, y) = a + bx + cy + dxÂ² + exy + fyÂ².
+  double A[6][7] = {};
+  int samples = 0;
+  eachSample([&](const Vec3& p, const Vec3& n, float w) {
+    if (dot(n, N) <= 0) return;
+    const Vec3 q = (p - origin) / r;
+    const double x = dot(q, U), y = dot(q, V), b[6] = {1, x, y, x * x, x * y, y * y};
+    for (int i = 0; i < 6; ++i) {
+      for (int j = 0; j < 6; ++j) A[i][j] += w * b[i] * b[j];
+      A[i][6] += w * b[i] * dot(q, N);
+    }
+    ++samples;
+  });
+  if (samples < 12) return;  // too coarse a mesh for a fit: the neighbors do it
+  for (int i = 0; i < 6; ++i) A[i][i] += 1e-6 * A[0][0];
+  for (int i = 0; i < 6; ++i) {
+    int pivot = i;
+    for (int k = i + 1; k < 6; ++k)
+      if (std::fabs(A[k][i]) > std::fabs(A[pivot][i])) pivot = k;
+    if (std::fabs(A[pivot][i]) < 1e-12) return;
+    std::swap(A[i], A[pivot]);
+    for (int k = 0; k < 6; ++k) {
+      if (k == i) continue;
+      const double f = A[k][i] / A[i][i];
+      for (int j = i; j < 7; ++j) A[k][j] -= f * A[i][j];
+    }
+  }
+  double fit[6];
+  for (int i = 0; i < 6; ++i) fit[i] = A[i][6] / A[i][i];
+
+  for (int v : region_) {
+    Vertex& vx = mesh_.vertex(v);
+    if (!usable(vx) || dot(vx.normal, N) <= 0) continue;
+    float t = 1 - 1.3f * length(vx.pos - c) / r;
+    if (t <= 0) continue;
+    if (const float m = stampValue(vx.pos, c, stampFrame_); m >= 0) t = m;
+    if (t <= 0) continue;
+    const Vec3 q = (vx.pos - origin) / r;
+    const double x = dot(q, U), y = dot(q, V);
+    const float target = float(fit[0] + fit[1] * x + fit[2] * y + fit[3] * x * x + fit[4] * x * y + fit[5] * y * y);
+    vx.pos += N * ((target - dot(q, N)) * r * std::sin(t * kPi / 2) * weight(v) * 0.3f * s);
+    if (vx.onSymmetryPlane) vx.pos.x = 0;
+    touched(mesh_, v);
+  }
+}
+
 void Stroke::smooth(const Vec3& c) {
+  smoothForm(c);
   const float r = s_.radius, s = std::fabs(s_.strength);
   for (int iteration = 0; iteration < 2; ++iteration) {
     for (int v : region_) {

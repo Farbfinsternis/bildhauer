@@ -53,10 +53,15 @@ public final class MainActivity extends Activity {
         // The view fills the screen around a camera hole; the UI keeps clear of it.
         getWindow().getAttributes().layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        hideStatusBar();
         view = new SculptView();
         setContentView(view);
+    }
+
+    // Only the status bar goes: without hardware keys, the navigation bar is
+    // the way out of the app. The UI keeps clear of it (onApplyWindowInsets).
+    private void hideStatusBar() {
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
     @Override protected void onResume() { super.onResume(); view.onResume(); }
@@ -64,8 +69,7 @@ public final class MainActivity extends Activity {
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
 
-        if (focused) getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        if (focused) hideStatusBar();
     }
 
     @Override protected void onPause() {
@@ -186,8 +190,10 @@ public final class MainActivity extends Activity {
         @Override public void onSurfaceChanged(GL10 gl, int width, int height) { nativeResize(width,height); }
         @Override public WindowInsets onApplyWindowInsets(WindowInsets insets) {
             final DisplayCutout cutout=insets.getDisplayCutout();
-            final int left=cutout==null ? 0 : cutout.getSafeInsetLeft(), top=cutout==null ? 0 : cutout.getSafeInsetTop();
-            final int right=cutout==null ? 0 : cutout.getSafeInsetRight(), bottom=cutout==null ? 0 : cutout.getSafeInsetBottom();
+            final int left=Math.max(insets.getSystemWindowInsetLeft(),cutout==null ? 0 : cutout.getSafeInsetLeft());
+            final int top=Math.max(insets.getSystemWindowInsetTop(),cutout==null ? 0 : cutout.getSafeInsetTop());
+            final int right=Math.max(insets.getSystemWindowInsetRight(),cutout==null ? 0 : cutout.getSafeInsetRight());
+            final int bottom=Math.max(insets.getSystemWindowInsetBottom(),cutout==null ? 0 : cutout.getSafeInsetBottom());
             queueEvent(() -> nativeInsets(left,top,right,bottom));
             wake();
             return super.onApplyWindowInsets(insets);

@@ -95,6 +95,7 @@ class Stroke {
 
   void draw(const Vec3& c, bool mirror);
   void smooth(const Vec3& c);
+  void smoothForm(const Vec3& c);
   void grab(const Vec3& c);
   void inflate(const Vec3& c, bool mirror);
   void flatten(const Vec3& c, bool mirror, const Vec3& toEye);
