@@ -5,8 +5,8 @@
 # bildhauer
 
 **bildhauer is a remake of Sculptris**, the free digital sculpting program
-that many artists started with. It runs on Windows and, new in this version,
-on Android tablets with a pen.
+that many artists started with. It runs on Windows and on Android tablets and
+phones. On Android you can sculpt with a pen or with your fingers.
 
 ## Why
 
@@ -40,6 +40,8 @@ down.
   in bildhauer, and files saved by bildhauer open in Sculptris.
 - **Export as OBJ** (File > Export OBJ) to keep working on your model in
   Blender, ZBrush, Maya or any other 3D program.
+- **Sculpt on the go** on an Android tablet or phone, with a pen or just your
+  fingers.
 
 ## Who it is for
 
@@ -67,27 +69,45 @@ Note: as in Sculptris, switching to paint mode is one way. Once you paint,
 the shape of the model is fixed, so save a copy first if you want to keep
 sculpting it.
 
-## On an Android tablet
+## On Android tablets and phones
 
-bildhauer also runs on Android tablets with a pen, such as a Samsung Galaxy
-Tab with S Pen.
+bildhauer runs on Android tablets and phones. You need no pen: your fingers
+work as well. It was tested on a Samsung Galaxy Tab S3 with S Pen and on a
+Google Pixel 7 Pro.
 
+### Sculpting with touch or a pen
+
+- **Finger on the model:** sculpt.
+- **Finger next to the model:** turn the view. Add a second finger to move
+  and zoom. The second finger can land anywhere, but the first one must start
+  next to the model.
 - **Pen on the model:** sculpt. Pressing harder makes the brush stronger.
 - **Pen next to the model:** turn the view.
-- **Finger on the model:** sculpt, like the pen.
-- **Finger next to the model:** turn the view. Add a second finger to move
-  and zoom.
+
+While the pen touches the screen or hovers over it, fingers do nothing, so
+your hand can rest on the glass. If the model fills the whole screen, Frame
+brings it back.
+
+### On a tablet
+
 - The tools are on the left. Size, strength and the other settings are in
   the bar at the top. Tap the small tab under the bar to fold it away and
   get more room.
 - Undo, Frame and Wireframe are at the bottom. Open, Save and OBJ export are
   in the menu at the top right.
 
-On a phone, hold it sideways. The model gets the whole screen: tap the tool
-button on the left for all tools, and the tab at the top for the other
-settings. Size, Strength and Invert stay on the right, Undo on the left.
+### On a phone
 
-The Android version is new and still a test version. It does not paint yet.
+Hold the phone sideways. The model gets the whole screen.
+
+- The current tool, Undo, Frame and Wireframe are on the left. Tap the tool
+  to see all tools with large icons.
+- Size, Strength and Invert are on the right, always at hand.
+- Tap the tab at the top for the other settings: Detail, symmetry, the
+  material, the tool's options and the menu with Open, Save and OBJ export.
+- Tap next to an open panel to close it.
+
+The Android version is a test version. It does not paint yet.
 
 ## Download
 
@@ -96,8 +116,8 @@ Both versions are on the
 
 - **Windows** (10 and 11, 64 bit): download the ZIP, unpack it anywhere and
   start `bildhauer.exe`. Nothing needs to be installed.
-- **Android** (9 or newer, 64 bit): download the APK on the tablet and open
-  it. Android asks once whether you allow apps from this source.
+- **Android** (9 or newer, 64 bit): download the APK on the tablet or phone
+  and open it. Android asks once whether you allow apps from this source.
 
 Developers find how to build it in [DEVELOPMENT.md](DEVELOPMENT.md).
 
