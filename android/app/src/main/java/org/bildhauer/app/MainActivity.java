@@ -7,9 +7,12 @@ import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.view.DisplayCutout;
 import android.view.MotionEvent;
 
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.util.Log;
 import android.widget.Toast;
 import java.io.File;
@@ -30,6 +33,7 @@ public final class MainActivity extends Activity {
     static { System.loadLibrary("bildhauer_android"); }
     private static native boolean nativeInit(String directory, float density, boolean restore);
     private static native void nativeResize(int width, int height);
+    private static native void nativeInsets(int left, int top, int right, int bottom);
     private static native int nativeFrame();
     private static native void nativePointer(int action, float x, float y, float pressure, boolean button);
 
@@ -46,6 +50,9 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         restoreSession = state != null;
+        // The view fills the screen around a camera hole; the UI keeps clear of it.
+        getWindow().getAttributes().layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         view = new SculptView();
@@ -177,6 +184,14 @@ public final class MainActivity extends Activity {
             if (!ready) toast("Graphics initialization failed; see the bildhauer log");
         }
         @Override public void onSurfaceChanged(GL10 gl, int width, int height) { nativeResize(width,height); }
+        @Override public WindowInsets onApplyWindowInsets(WindowInsets insets) {
+            final DisplayCutout cutout=insets.getDisplayCutout();
+            final int left=cutout==null ? 0 : cutout.getSafeInsetLeft(), top=cutout==null ? 0 : cutout.getSafeInsetTop();
+            final int right=cutout==null ? 0 : cutout.getSafeInsetRight(), bottom=cutout==null ? 0 : cutout.getSafeInsetBottom();
+            queueEvent(() -> nativeInsets(left,top,right,bottom));
+            wake();
+            return super.onApplyWindowInsets(insets);
+        }
         @Override public void onDrawFrame(GL10 gl) {
             if (!ready) return;
             drainPen(true);

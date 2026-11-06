@@ -83,6 +83,10 @@ Tab with S Pen.
 - Undo, Frame and Wireframe are at the bottom. Open, Save and OBJ export are
   in the menu at the top right.
 
+On a phone, hold it sideways. The model gets the whole screen: tap the tool
+button on the left for all tools, and the tab at the top for the other
+settings. Size, Strength and Invert stay on the right, Undo on the left.
+
 The Android version is new and still a test version. It does not paint yet.
 
 ## Download

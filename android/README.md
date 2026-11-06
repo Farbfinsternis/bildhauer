@@ -1,4 +1,4 @@
-# Android tablet prototype
+# Android tablet and phone prototype
 
 The Android app lives in the same repository as the Windows application.
 It shares the mesh kernel, brushes, SC1/OBJ codecs, document operations,
@@ -92,6 +92,14 @@ keystore to allow installation of updates without uninstalling the app.
   A view bar offers Undo, Frame and Wireframe; the triangle count and
   messages are dim text in the corner. Pen and fingers share one hit test
   (`uiAt`) for what belongs to the UI.
+- Phones get their own layout: below 600 dp on the shorter screen side the
+  model fills the whole landscape screen. On the left are the tool button,
+  Undo, Frame and Wireframe, on the right the axes, upright Size and Strength
+  sliders and Invert. The tool button opens all tools with large icons, the tab
+  at the top opens Detail, symmetry, the material, the menu and the tool's
+  options. A tap beside an open panel only closes it. The panels open on a tap
+  because swiping in from the edge belongs to Android, and the UI keeps clear
+  of a camera hole (`nativeInsets`). Pressure has no switch here; it stays on.
 - Material... opens a panel of the built-in matcaps, as in Sculptris. Red wax,
   fitted to the Sculptris default, is the start material. With symmetry on, a
   faint light line marks the mirror plane on the mesh.

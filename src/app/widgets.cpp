@@ -93,9 +93,10 @@ const char* toolDescription(Tool tool) {
   return "";
 }
 
-bool stripButton(const char* label, Icon icon, bool selected, const char* tooltip, float height) {
+bool stripButton(const char* label, Icon icon, bool selected, const char* tooltip, float height, float width) {
   const ImGuiStyle& st = ImGui::GetStyle();
-  const float w = ImGui::GetContentRegionAvail().x, h = height > 0 ? height : ImGui::GetFrameHeight() * 2.3f;
+  const float w = width > 0 ? width : ImGui::GetContentRegionAvail().x;
+  const float h = height > 0 ? height : ImGui::GetFrameHeight() * 2.3f;
   ImGui::PushID(label);
   const ImVec2 p = ImGui::GetCursorScreenPos();
   const bool clicked = ImGui::InvisibleButton("##tool", ImVec2(w, h));

@@ -21,9 +21,9 @@ void panelTitle(Icon icon, const char* title, const char* description);
 
 const char* toolDescription(Tool tool);
 
-// A tool button of the strip: the icon with a small label under it, as wide as
-// the strip. `height` <= 0: the desktop height.
-bool stripButton(const char* label, Icon icon, bool selected, const char* tooltip, float height = 0);
+// A tool button of the strip: the icon with a small label under it. `height`
+// <= 0: the desktop height; `width` <= 0: as wide as the strip.
+bool stripButton(const char* label, Icon icon, bool selected, const char* tooltip, float height = 0, float width = 0);
 
 // A square icon button of the view bar. `side` <= 0: the desktop size.
 bool viewButton(const char* id, Icon icon, bool selected, const char* tooltip, float side = 0);
