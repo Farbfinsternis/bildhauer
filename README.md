@@ -65,6 +65,12 @@ down.
 The status bar always shows the keys for the current brush. All shortcuts:
 Help > Mouse and keys.
 
+**With a pen tablet** (Wacom, Cintiq, Surface Pen and others), pressing
+harder makes the stroke stronger, both when sculpting and when painting.
+"Pen pressure" in the brush panel switches this off. With a Wacom tablet,
+"Use Windows Ink" must be on in the Wacom Tablet Properties (it is on by
+default).
+
 Note: as in Sculptris, switching to paint mode is one way. Once you paint,
 the shape of the model is fixed, so save a copy first if you want to keep
 sculpting it.

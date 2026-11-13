@@ -60,13 +60,15 @@ void beginStroke(int mx, int my, bool invert, bool smoothing, float pressure) {
   app.modified = true;
 }
 
-void beginPaintStroke(int mx, int my, bool invert) {
+void beginPaintStroke(int mx, int my, bool invert, float pressure) {
   StrokeInput in = inputAt(mx, my);
   if (!in.hit) return;
   const std::array<float, 3>& ps = paintSliders();
   PaintSettings s = app.paint;
   s.radius = worldRadius(in.point);
   s.strength = brushStrength(ps[1]) * (invert ? -1.0f : 1.0f);
+  app.strokeStrength = s.strength;
+  s.strength *= std::clamp(pressure, 0.0f, 1.0f);
   s.hardness = ps[2];
   s.target = app.editSlot;
   // The view the stroke is painted from: the screen axes turn a fixed stamp;
@@ -111,6 +113,7 @@ void moveStroke(int x, int y, float pressure) {
   }
   if (app.paintStroke) {
     if (in.hit) app.paintStroke->setRadius(worldRadius(in.point));
+    app.paintStroke->setStrength(app.strokeStrength * std::clamp(pressure, 0.0f, 1.0f));
     app.paintStroke->moveTo(in.point, in.hit);
   }
 }

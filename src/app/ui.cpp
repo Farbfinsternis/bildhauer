@@ -189,6 +189,13 @@ void toolStrip() {
   ImGui::PopStyleColor();
 }
 
+void penPressureBox() {
+  ImGui::Checkbox("Pen pressure", &app.penPressure);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    ImGui::SetTooltip("Pressing the pen harder makes the stroke stronger.\n"
+                      "With a Wacom tablet, \"Use Windows Ink\" must be on in its settings.");
+}
+
 // The current sculpt brush: its sliders and options, and the brush mask.
 void sculptBrushPanel() {
   const Tool tool = app.brush.tool;
@@ -197,6 +204,8 @@ void sculptBrushPanel() {
   ImGui::SeparatorText("Brush");
   slider("Size", s.size);
   slider("Strength", s.strength);
+  // Grab, Rotate and Scale follow the pen; pressure does not change them.
+  if (tool != Tool::Grab && tool != Tool::Rotate && tool != Tool::Scale) penPressureBox();
   auto option = [](const char* label, bool& value, const char* tip) {
     ImGui::Checkbox(label, &value);
     if (tip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tip);
@@ -467,6 +476,7 @@ void paintBrushPanel() {
   slider("Size", ps[0]);
   slider("Strength", ps[1]);
   slider("Hardness", ps[2]);
+  penPressureBox();
   ImGui::Checkbox("Surface angle falloff", &app.paint.angleFalloff);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
     ImGui::SetTooltip("Leave surface that turns away from the spot under the brush");
@@ -697,9 +707,14 @@ void initUi(HWND hwnd) {
     std::string font = std::string(fonts) + "\\Fonts\\segoeui.ttf";
     if (GetFileAttributesA(font.c_str()) != INVALID_FILE_ATTRIBUTES) io.Fonts->AddFontFromFileTTF(font.c_str(), 16.0f);
   }
-  applyStyle(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));
+  setUiScale(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));
   ImGui_ImplWin32_Init(hwnd);
   ImGui_ImplOpenGL2_Init();
+}
+
+void setUiScale(float scale) {
+  windowsHost.dpiScale = scale;
+  if (ImGui::GetCurrentContext()) applyStyle(scale);
 }
 
 void layoutView(bool withUi) {

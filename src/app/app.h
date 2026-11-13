@@ -56,7 +56,8 @@ struct App {
   bool beautify = true;  // "Beautify/relax mesh (always used when adding detail)"
   std::array<ToolSliders, int(Tool::Reduce) + 1> sliders;
   std::unique_ptr<Stroke> stroke;
-  float strokeStrength = 0;
+  float strokeStrength = 0;  // of the current stroke (sculpt or paint) before pen pressure
+  bool penPressure = true;   // pen pressure scales strength (Windows; Android has its own switch)
   struct PendingGrab {
     bool valid = false;
     int x = 0, y = 0;

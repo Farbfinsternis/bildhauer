@@ -255,6 +255,8 @@ class PaintStroke {
   PaintStroke(Canvas& canvas, const PaintSettings& settings, const Vec3& start);
   void moveTo(const Vec3& point, bool hit);
   void setRadius(float radius) { s_.radius = radius; }
+  // Pen pressure changes strength within the stroke.
+  void setStrength(float strength) { s_.strength = strength; }
 
  private:
   void dab(const Vec3& c);

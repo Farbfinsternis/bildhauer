@@ -19,7 +19,7 @@ StrokeInput inputAt(int mx, int my, PickHit* hitOut = nullptr);
 void beginStroke(int mx, int my, bool invert, bool smoothing, float pressure = 1.0f);
 // Ctrl inverts: the secondary color, lowering the bump, flattening away
 // from the neutral height.
-void beginPaintStroke(int mx, int my, bool invert);
+void beginPaintStroke(int mx, int my, bool invert, float pressure = 1.0f);
 
 // Selects a sculpt tool; selecting it again toggles its option, as in
 // Sculptris (Clay, Lock plane, Global).
@@ -33,9 +33,10 @@ bool flushPendingStroke();
 void endStroke();
 
 #ifdef _WIN32
-void onMouseDown(UINT msg, int x, int y, WPARAM flags);
+// `pressure` is the pen's (0..1), 1 for the mouse.
+void onMouseDown(UINT msg, int x, int y, WPARAM flags, float pressure);
 void onMouseUp();
-void onMouseMove(int x, int y);
+void onMouseMove(int x, int y, float pressure);
 void onMouseWheel(int delta);
 void onKey(WPARAM key);
 #endif

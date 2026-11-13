@@ -101,12 +101,13 @@ void onSculptKey(WPARAM key, bool ctrl) {
 
 }  // namespace
 
-void onMouseDown(UINT msg, int x, int y, WPARAM flags) {
+void onMouseDown(UINT msg, int x, int y, WPARAM flags, float pressure) {
   SetCapture(windowsHost.hwnd);
+  if (!app.penPressure) pressure = 1;
   if (msg == WM_LBUTTONDOWN) {
     if (GetKeyState(VK_MENU) < 0) app.orbiting = true;
-    else if (app.paintMode) beginPaintStroke(x, y, (flags & MK_CONTROL) != 0);
-    else beginStroke(x, y, (flags & MK_CONTROL) != 0, (flags & MK_SHIFT) != 0);
+    else if (app.paintMode) beginPaintStroke(x, y, (flags & MK_CONTROL) != 0, pressure);
+    else beginStroke(x, y, (flags & MK_CONTROL) != 0, (flags & MK_SHIFT) != 0, pressure);
   } else {
     (msg == WM_RBUTTONDOWN ? app.orbiting : app.panning) = true;
   }
@@ -121,16 +122,18 @@ void onMouseUp() {
   app.orbiting = app.panning = false;
 }
 
-void onMouseMove(int x, int y) {
+void onMouseMove(int x, int y, float pressure) {
   int dx = x - app.mouseX, dy = y - app.mouseY;
   if (app.orbiting) {
-    app.camera.yaw -= dx * 0.008f;
-    app.camera.pitch = std::clamp(app.camera.pitch + dy * 0.008f, -1.5f, 1.5f);
+    // Per inch rather than per pixel: the same hand movement at any scaling.
+    const float turn = 0.008f / windowsHost.dpiScale;
+    app.camera.yaw -= dx * turn;
+    app.camera.pitch = std::clamp(app.camera.pitch + dy * turn, -1.5f, 1.5f);
   } else if (app.panning) {
     float scale = app.camera.distance * 2 * std::tan(kFov / 2) / float(app.viewH);
     app.camera.target += (app.camera.right() * float(-dx) + app.camera.up() * float(dy)) * scale;
   }
-  moveStroke(x, y);
+  moveStroke(x, y, app.penPressure ? pressure : 1.0f);
   app.mouseX = x;
   app.mouseY = y;
 }

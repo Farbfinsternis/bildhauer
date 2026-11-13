@@ -11,6 +11,8 @@ namespace bh::viewer {
 // Context, Win32 and OpenGL backends, font and style for the window's DPI.
 void initUi(HWND hwnd);
 void shutdownUi();
+// Font and style for a new DPI scale (the window moved to another monitor).
+void setUiScale(float scale);
 
 // Feeds a window message to the UI; true if the UI consumed it entirely.
 bool uiHandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);

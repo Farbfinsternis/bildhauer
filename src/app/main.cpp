@@ -39,7 +39,23 @@ namespace {
 // even over the UI.
 bool viewHasMouse() { return app.stroke || app.paintStroke || app.orbiting || app.panning; }
 
+// The pen's pressure (0..1) from its last pointer message. Windows turns pen
+// input into mouse messages as well; those carry no pressure, so the mouse
+// handlers take it from here when a message comes from the pen.
+float penPressure = 1;
+
+void readPenPressure(WPARAM wp) {
+  POINTER_PEN_INFO pen;
+  if (!GetPointerPenInfo(GET_POINTERID_WPARAM(wp), &pen)) return;
+  penPressure = (pen.penMask & PEN_MASK_PRESSURE) ? std::clamp(float(pen.pressure) / 1024.0f, 0.0f, 1.0f) : 1.0f;
+}
+
+// Mouse messages that Windows made from pen input are marked (see "System
+// Events and Mouse Messages" in the Windows docs).
+bool messageFromPen() { return (GetMessageExtraInfo() & 0xFFFFFF80) == 0xFF515700; }
+
 LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+  const float pressure = messageFromPen() ? penPressure : 1.0f;  // before other calls change it
   // The 3D view shows a crosshair; over the UI, ImGui sets its own cursor.
   if (msg == WM_SETCURSOR && LOWORD(lp) == HTCLIENT && (viewHasMouse() || !uiWantsMouse())) {
     SetCursor(LoadCursor(nullptr, IDC_CROSS));
@@ -51,6 +67,20 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   const int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
   switch (msg) {
+    case WM_POINTERDOWN:
+    case WM_POINTERUPDATE:
+      if (POINTER_INPUT_TYPE type; GetPointerType(GET_POINTERID_WPARAM(wp), &type) && type == PT_PEN)
+        readPenPressure(wp);
+      break;  // on to DefWindowProc, which sends the mouse messages
+    case WM_DPICHANGED: {
+      // Moved to a monitor with other scaling: the size Windows suggests
+      // keeps the window as large to the eye, and the UI follows.
+      setUiScale(HIWORD(wp) / 96.0f);
+      const RECT* r = reinterpret_cast<const RECT*>(lp);
+      SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
+                   SWP_NOZORDER | SWP_NOACTIVATE);
+      return 0;
+    }
     case WM_SIZE:
       app.width = std::max(1, int(LOWORD(lp)));
       app.height = std::max(1, int(HIWORD(lp)));
@@ -58,7 +88,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
     case WM_MBUTTONDOWN:
-      if (!uiWantsMouse()) onMouseDown(msg, x, y, wp);
+      if (!uiWantsMouse()) onMouseDown(msg, x, y, wp, pressure);
       return 0;
     case WM_LBUTTONUP:
     case WM_RBUTTONUP:
@@ -66,7 +96,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       if (viewHasMouse()) onMouseUp();
       return 0;
     case WM_MOUSEMOVE:
-      if (viewHasMouse() || !uiWantsMouse()) onMouseMove(x, y);
+      if (viewHasMouse() || !uiWantsMouse()) onMouseMove(x, y, pressure);
       else app.hover = PickHit{};  // no brush ring over the UI
       return 0;
     case WM_MOUSEWHEEL:
@@ -85,6 +115,37 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
+// Holding the pen still would otherwise wait for a right click, and taps
+// would draw ripples: a sculpting stroke wants the plain pen.
+void disablePenGestures(HWND hwnd) {
+  const char* name = "MicrosoftTabletPenServiceProperty";
+  GlobalAddAtomA(name);
+  // Press and hold, tap feedback, barrel feedback, flicks.
+  const DWORD_PTR flags = 0x00000001 | 0x00000008 | 0x00000010 | 0x00010000;
+  SetPropA(hwnd, name, reinterpret_cast<HANDLE>(flags));
+  const BOOL off = FALSE;
+  for (FEEDBACK_TYPE f : {FEEDBACK_PEN_BARRELVISUALIZATION, FEEDBACK_PEN_TAP, FEEDBACK_PEN_DOUBLETAP,
+                          FEEDBACK_PEN_PRESSANDHOLD, FEEDBACK_PEN_RIGHTTAP})
+    SetWindowFeedbackSetting(hwnd, f, 0, sizeof off, &off);
+}
+
+// The starting size is meant for 100 %; on a scaled monitor the window grows
+// along, within the monitor's work area.
+void scaleWindowForDpi(HWND hwnd) {
+  const float scale = GetDpiForWindow(hwnd) / 96.0f;
+  if (scale <= 1) return;
+  MONITORINFO mi{sizeof mi};
+  GetMonitorInfoA(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+  RECT w;
+  GetWindowRect(hwnd, &w);
+  const RECT& area = mi.rcWork;
+  const int width = std::min(int((w.right - w.left) * scale), int(area.right - area.left));
+  const int height = std::min(int((w.bottom - w.top) * scale), int(area.bottom - area.top));
+  const int left = std::clamp(int(w.left), int(area.left), int(area.right) - width);
+  const int top = std::clamp(int(w.top), int(area.top), int(area.bottom) - height);
+  SetWindowPos(hwnd, nullptr, left, top, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 bool createWindow(HINSTANCE instance) {
   WNDCLASSEXA wc{};
   wc.cbSize = sizeof wc;
@@ -99,9 +160,10 @@ bool createWindow(HINSTANCE instance) {
                                              GetSystemMetrics(SM_CYSMICON), 0));
   wc.lpszClassName = "bildhauer";
   RegisterClassExA(&wc);
-  windowsHost.hwnd = CreateWindowA("bildhauer", "bildhauer", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
+  windowsHost.hwnd = CreateWindowA("bildhauer", "bildhauer", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                            app.width, app.height, nullptr, nullptr, instance, nullptr);
   if (!windowsHost.hwnd) return false;
+  disablePenGestures(windowsHost.hwnd);
   windowsHost.hdc = GetDC(windowsHost.hwnd);
   PIXELFORMATDESCRIPTOR pfd{};
   pfd.nSize = sizeof pfd;
@@ -169,6 +231,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     MessageBoxA(nullptr, "Could not create an OpenGL window.", "bildhauer", MB_ICONERROR);
     return 1;
   }
+  // Snapshots keep exactly the size they were made for.
+  if (snapshot.path.empty()) scaleWindowForDpi(windowsHost.hwnd);
+  ShowWindow(windowsHost.hwnd, SW_SHOW);
   initRendering();
   initUi(windowsHost.hwnd);
   if (!snapshot.path.empty()) return runSnapshot(snapshot);

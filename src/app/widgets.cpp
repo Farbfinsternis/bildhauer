@@ -8,8 +8,11 @@
 namespace bh::viewer {
 
 void applyStyle(float scale) {
-  ImGui::StyleColorsDark();
+  // From the defaults each time: ScaleAllSizes multiplies, and the scale
+  // changes when the window moves to a monitor with other DPI.
   ImGuiStyle& s = ImGui::GetStyle();
+  s = ImGuiStyle();
+  ImGui::StyleColorsDark(&s);
   s.WindowRounding = 0;
   s.ChildRounding = s.FrameRounding = s.GrabRounding = s.PopupRounding = 5;
   s.ScrollbarRounding = 5;
