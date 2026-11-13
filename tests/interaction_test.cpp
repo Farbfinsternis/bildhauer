@@ -192,5 +192,25 @@ int main() {
     std::string error;
     check(local.validate(&error),"Grab retains mesh invariants");
   }
+
+  // Clear mask: every vertex editable again, one undo step brings the mask
+  // back, and with nothing masked it neither changes nor records anything.
+  {
+    newModel();
+    app.undo.clear();
+    app.undoBudget=std::numeric_limits<size_t>::max();
+    app.mesh.vertex(0).weight=0;
+    app.mesh.vertex(1).weight=0.4f;
+    check(clearMask(),"clear mask reports a cleared mask");
+    bool unmasked=true;
+    for(int v=0;v<app.mesh.vertexSlots();++v)
+      unmasked=unmasked && (!app.mesh.vertex(v).active || app.mesh.vertex(v).weight==1);
+    check(unmasked,"clear mask makes every vertex editable");
+    check(app.undo.size()==1,"clear mask is one undo step");
+    undoLast();
+    check(app.mesh.vertex(0).weight==0 && app.mesh.vertex(1).weight==0.4f,"undo brings the mask back");
+    check(clearMask() && !clearMask(),"a second clear finds nothing masked");
+    check(app.undo.size()==1,"clearing an unmasked model records no undo step");
+  }
   return failures ? 1 : 0;
 }

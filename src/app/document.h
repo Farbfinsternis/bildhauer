@@ -40,6 +40,9 @@ bool pushUndo();
 void undoLast();  // the last stroke or mesh operation (paint mode: the last stroke)
 void subdivideAll();
 void reduceAll();
+// Removes the whole mask (every vertex editable again); undoable. Not in
+// paint mode. Returns false if nothing was masked.
+bool clearMask();
 // Turns mirror symmetry on (keeps the +x side) or off (mirrors the half into
 // a full mesh); undoable. Not in paint mode.
 void setSymmetry(bool on);

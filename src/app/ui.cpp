@@ -134,6 +134,7 @@ void menuBar() {
     ImGui::Separator();
     if (ImGui::MenuItem("Subdivide", "Ctrl+D", false, !app.paintMode)) subdivideAll();
     if (ImGui::MenuItem("Reduce all", "Ctrl+Y", false, !app.paintMode)) reduceAll();
+    if (ImGui::MenuItem("Clear mask", nullptr, false, !app.paintMode)) clearMask();
     if (ImGui::MenuItem("Symmetry", nullptr, app.mesh.symmetric, !app.paintMode)) askSetSymmetry(!app.mesh.symmetric);
     ImGui::Separator();
     if (ImGui::MenuItem("Enter paint mode...", "Ctrl+P", false, !app.paintMode)) askEnterPaintMode();
@@ -234,6 +235,11 @@ void sculptBrushPanel() {
     case Tool::Flatten:
       option("Lock plane", app.brush.lockPlane, "Keep the plane of the stroke's first dab (F again)");
       option("Angle falloff", app.brush.angleFalloff, "Leave surface that turns away from the plane");
+      break;
+    case Tool::Mask:
+      if (ImGui::Button("Clear mask", ImVec2(-1, 0))) clearMask();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("Removes the whole mask (Ctrl+Z brings it back)");
       break;
     case Tool::Grab:
       option("Global", app.brush.global, "Move every unmasked vertex (G again)");

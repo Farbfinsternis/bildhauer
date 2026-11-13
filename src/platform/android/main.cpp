@@ -226,9 +226,13 @@ int fileMenu() {
   return action;
 }
 
-// The current tool's checkboxes in one row. Returns whether it has any.
+// The current tool's checkboxes (Mask: its Clear button) in one row.
+// Returns whether it has any.
 bool toolOptions() {
   switch (app.brush.tool) {
+    case Tool::Mask:
+      if (ImGui::Button("Clear mask") && clearMask()) { savePending = true; invalidateMobileGeometry(); }
+      return true;
     case Tool::Draw:
       ImGui::Checkbox("Clay", &app.brush.clay); ImGui::SameLine(); ImGui::Checkbox("Soft", &app.brush.soft); return true;
     case Tool::Flatten:

@@ -209,6 +209,27 @@ void reduceAll() {
   app.modified = true;
 }
 
+bool clearMask() {
+  if (app.paintMode) return false;
+  Mesh& m = app.mesh;
+  bool masked = false;
+  for (int v = 0; v < m.vertexSlots() && !masked; ++v) masked = m.vertex(v).active && m.vertex(v).weight < 1;
+  if (!masked) {
+    app.status = "nothing is masked";
+    return false;
+  }
+  app.stroke.reset();
+  if (!pushUndo()) return false;
+  for (int v = 0; v < m.vertexSlots(); ++v) {
+    if (!m.vertex(v).active || m.vertex(v).weight >= 1) continue;
+    m.vertex(v).weight = 1;
+    m.noteVertex(v);  // the renderer's copy shows the mask
+  }
+  app.status = "mask cleared";
+  app.modified = true;
+  return true;
+}
+
 void setSymmetry(bool on) {
   if (app.paintMode || app.mesh.symmetric == on) return;
   app.stroke.reset();
