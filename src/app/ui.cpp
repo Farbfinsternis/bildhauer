@@ -16,7 +16,9 @@
 #include "app/icons.h"
 #include "app/input.h"
 #include "app/matcaps.h"
+#include "app/release.h"
 #include "app/render.h"
+#include "app/update.h"
 #include "app/widgets.h"
 #include "imgui.h"
 #include "imgui_impl_opengl2.h"
@@ -31,6 +33,12 @@ namespace {
 bool paintModeQuestion = false;  // open the "Enter paint mode?" dialog next frame
 int symmetryQuestion = -1;       // open the symmetry dialog next frame: 1 on, 0 off
 bool showKeys = false;
+
+// Update check (update.h): the dialog to open next frame, and the setting.
+enum class UpdateDialog { None, Available, UpToDate, Failed };
+UpdateDialog updateDialog = UpdateDialog::None;
+std::string updateTag;      // the newer release the dialog offers
+bool updateOnStart = true;  // read from the settings in initUi
 
 struct ToolButton {
   Tool tool;
@@ -139,6 +147,13 @@ void menuBar() {
   }
   if (ImGui::BeginMenu("Help")) {
     if (ImGui::MenuItem("Mouse and keys")) showKeys = true;
+    ImGui::Separator();
+    const bool checking = updateStatus().state == UpdateState::Checking;
+    if (ImGui::MenuItem(checking ? "Checking for updates..." : "Check for updates", nullptr, false, !checking))
+      startUpdateCheck(windowsHost.hwnd, true);
+    if (ImGui::MenuItem("Check for updates on start", nullptr, &updateOnStart)) setCheckUpdatesOnStart(updateOnStart);
+    ImGui::Separator();
+    ImGui::TextDisabled("bildhauer %s", appVersion());
     ImGui::EndMenu();
   }
 
@@ -627,6 +642,59 @@ void viewBar() {
   ImGui::PopStyleVar(2);
 }
 
+// A new release: go to its page, skip it (no more reminders until the next
+// one), or be asked again at the next start. After a manual check also "no
+// update" and "could not check".
+void updateDialogs() {
+  constexpr const char* kAvailable = "Update available";
+  constexpr const char* kUpToDate = "No update";
+  constexpr const char* kFailed = "Could not check for updates";
+  switch (updateDialog) {
+    case UpdateDialog::Available: ImGui::OpenPopup(kAvailable); break;
+    case UpdateDialog::UpToDate: ImGui::OpenPopup(kUpToDate); break;
+    case UpdateDialog::Failed: ImGui::OpenPopup(kFailed); break;
+    case UpdateDialog::None: break;
+  }
+  updateDialog = UpdateDialog::None;
+  const float button = 140 * ImGui::GetStyle().FontScaleDpi;
+
+  ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+  if (ImGui::BeginPopupModal(kAvailable, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    const std::vector<int> v = versionParts(updateTag);
+    std::string shown;
+    for (int n : v) shown += (shown.empty() ? "" : ".") + std::to_string(n);
+    ImGui::Text("bildhauer %s is available. You have %s.", shown.c_str(), appVersion());
+    ImGui::TextUnformatted("The release page lists what is new and has the download.");
+    ImGui::Spacing();
+    if (ImGui::Checkbox("Check for updates on start", &updateOnStart)) setCheckUpdatesOnStart(updateOnStart);
+    ImGui::Spacing();
+    if (ImGui::Button("Go to release", ImVec2(button, 0))) {
+      openInBrowser(releaseUrl(updateTag));
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Skip this version", ImVec2(button, 0))) {
+      skipRelease(updateTag);
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Later", ImVec2(button, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+
+  for (const char* title : {kUpToDate, kFailed}) {
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) continue;
+    if (title == kUpToDate) ImGui::Text("bildhauer %s is the latest version.", appVersion());
+    else ImGui::TextUnformatted("GitHub could not be reached. Check the internet connection and try again later.");
+    ImGui::Spacing();
+    if (ImGui::Button("OK", ImVec2(button, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+        ImGui::IsKeyPressed(ImGuiKey_Enter))
+      ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+}
+
 void dialogs() {
   if (paintModeQuestion) {
     ImGui::OpenPopup("Enter paint mode?");
@@ -673,6 +741,8 @@ void dialogs() {
     ImGui::EndPopup();
   }
 
+  updateDialogs();
+
   if (showKeys) {
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::Begin("Mouse and keys", &showKeys, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
@@ -708,6 +778,7 @@ void initUi(HWND hwnd) {
     if (GetFileAttributesA(font.c_str()) != INVALID_FILE_ATTRIBUTES) io.Fonts->AddFontFromFileTTF(font.c_str(), 16.0f);
   }
   setUiScale(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));
+  updateOnStart = checkUpdatesOnStart();
   ImGui_ImplWin32_Init(hwnd);
   ImGui_ImplOpenGL2_Init();
 }
@@ -768,6 +839,21 @@ void askEnterPaintMode() {
 
 void askSetSymmetry(bool on) {
   if (!app.paintMode && app.mesh.symmetric != on) symmetryQuestion = on ? 1 : 0;
+}
+
+void onUpdateChecked() {
+  const UpdateStatus s = updateStatus();
+  switch (s.state) {
+    case UpdateState::Available:
+      if (s.manual || s.latest != skippedRelease()) {
+        updateTag = s.latest;
+        updateDialog = UpdateDialog::Available;
+      }
+      break;
+    case UpdateState::UpToDate: if (s.manual) updateDialog = UpdateDialog::UpToDate; break;
+    case UpdateState::Failed: if (s.manual) updateDialog = UpdateDialog::Failed; break;
+    default: break;
+  }
 }
 
 }  // namespace bh::viewer

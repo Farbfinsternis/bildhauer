@@ -1,3 +1,30 @@
 // The app icon (made by tools/make-icons.ps1 from docs/bildhauer.png). The
 // first icon in the exe is the one Explorer and the taskbar show.
 1 ICON "bildhauer.ico"
+
+// The version Explorer shows under Properties > Details.
+#include <winver.h>
+#include "version.h"
+
+VS_VERSION_INFO VERSIONINFO
+  FILEVERSION BILDHAUER_VERSION_MAJOR, BILDHAUER_VERSION_MINOR, BILDHAUER_VERSION_PATCH, 0
+  PRODUCTVERSION BILDHAUER_VERSION_MAJOR, BILDHAUER_VERSION_MINOR, BILDHAUER_VERSION_PATCH, 0
+  FILEOS VOS_NT_WINDOWS32
+  FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "bildhauer"
+      VALUE "FileVersion", BILDHAUER_VERSION
+      VALUE "ProductName", "bildhauer"
+      VALUE "ProductVersion", BILDHAUER_VERSION
+      VALUE "LegalCopyright", "MIT License"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

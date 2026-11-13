@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
-project(bildhauer LANGUAGES CXX)
+# The version of a release: bump it here (and versionName/versionCode in
+# android/app/build.gradle). The Windows app compares it with GitHub's latest
+# release to tell the user about updates.
+project(bildhauer VERSION 0.1.3 LANGUAGES CXX)
+configure_file(src/app/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -64,11 +68,14 @@ if(WIN32)
     src/app/matcaps.cpp
     src/app/render.cpp
     src/app/snapshot.cpp
+    src/app/settings.cpp
     src/app/ui.cpp
+    src/app/update.cpp
     src/app/widgets.cpp
     src/app/bildhauer.rc
   )
-  target_link_libraries(bildhauer PRIVATE bildhauer_core imgui opengl32 comdlg32 windowscodecs ole32 dwmapi)
+  target_include_directories(bildhauer PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  target_link_libraries(bildhauer PRIVATE bildhauer_core imgui opengl32 comdlg32 windowscodecs ole32 dwmapi winhttp shell32)
   target_compile_definitions(bildhauer PRIVATE WIN32_LEAN_AND_MEAN)
 endif()
 
@@ -113,6 +120,9 @@ add_test(NAME mesh_tree COMMAND mesh_tree_test)
 add_executable(grab_test tests/grab_test.cpp)
 target_link_libraries(grab_test PRIVATE bildhauer_core)
 add_test(NAME grab COMMAND grab_test)
+add_executable(release_test tests/release_test.cpp)
+target_include_directories(release_test PRIVATE src)
+add_test(NAME release COMMAND release_test)
 
 add_executable(sc1_test tests/sc1_test.cpp)
 target_link_libraries(sc1_test PRIVATE bildhauer_core)

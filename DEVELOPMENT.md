@@ -71,6 +71,13 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+**Version.** A release sets its version in `project()` in `CMakeLists.txt`
+(it goes into the exe and its file properties) and in `versionName` /
+`versionCode` in `android/app/build.gradle`. The GitHub tag is that version
+with a `v` (`v0.1.4`): the Windows app compares the tag of the latest release
+with its own version to offer the update (`src/app/update.cpp`). An exe
+released without the bumped version would offer its own release as an update.
+
 Release builds (the ZIP on GitHub) link the C++ runtime statically, so the
 exe needs nothing but Windows:
 

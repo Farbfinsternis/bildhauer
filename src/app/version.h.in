@@ -1,0 +1,12 @@
+#ifndef BILDHAUER_VERSION_H
+#define BILDHAUER_VERSION_H
+
+// Made by CMake from src/app/version.h.in: the version is set once, in
+// project() in CMakeLists.txt. Read by the code and by bildhauer.rc.
+
+#define BILDHAUER_VERSION "@PROJECT_VERSION@"
+#define BILDHAUER_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define BILDHAUER_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define BILDHAUER_VERSION_PATCH @PROJECT_VERSION_PATCH@
+
+#endif

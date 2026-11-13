@@ -32,4 +32,8 @@ void askEnterPaintMode();
 // Switching symmetry changes the mesh, so it asks first.
 void askSetSymmetry(bool on);
 
+// An update check has finished (update.h): offers a new release, or after
+// Help > Check for updates also says that there is none or the check failed.
+void onUpdateChecked();
+
 }  // namespace bh::viewer

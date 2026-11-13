@@ -121,7 +121,10 @@ Both versions are on the
 [Releases](https://github.com/Farbfinsternis/bildhauer/releases) page.
 
 - **Windows** (10 and 11, 64 bit): download the ZIP, unpack it anywhere and
-  start `bildhauer.exe`. Nothing needs to be installed.
+  start `bildhauer.exe`. Nothing needs to be installed. When a new version
+  is out, bildhauer tells you at start and leads you to its release page.
+  For that it asks GitHub for the latest release, sending nothing but its
+  own version. Help > Check for updates on start switches this off.
 - **Android** (9 or newer, 64 bit): download the APK on the tablet or phone
   and open it. Android asks once whether you allow apps from this source.
 

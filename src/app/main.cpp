@@ -26,6 +26,7 @@
 #include "app/render.h"
 #include "app/snapshot.h"
 #include "app/ui.h"
+#include "app/update.h"
 #include "app/widgets.h"
 #include "core/relax.h"
 #include "imgui_impl_win32.h"
@@ -104,6 +105,9 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     case WM_KEYDOWN:
       if (!uiWantsKeyboard()) onKey(wp);
+      return 0;
+    case kUpdateCheckedMessage:
+      onUpdateChecked();
       return 0;
     case WM_CLOSE:
       if (confirmDiscard()) DestroyWindow(hwnd);
@@ -237,6 +241,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
   initRendering();
   initUi(windowsHost.hwnd);
   if (!snapshot.path.empty()) return runSnapshot(snapshot);
+  if (checkUpdatesOnStart()) startUpdateCheck(windowsHost.hwnd, false);
 
   MSG msg;
   int settleFrames = 0;  // the UI needs a few frames to react to input (popups, hover)
