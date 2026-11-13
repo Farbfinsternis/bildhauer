@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 # The version of a release: bump it here (and versionName/versionCode in
 # android/app/build.gradle). The Windows app compares it with GitHub's latest
 # release to tell the user about updates.
-project(bildhauer VERSION 0.1.3 LANGUAGES CXX)
+project(bildhauer VERSION 0.1.4 LANGUAGES CXX)
 configure_file(src/app/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h)
 
 set(CMAKE_CXX_STANDARD 20)
