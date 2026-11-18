@@ -18,6 +18,7 @@
 
 #include <GL/gl.h>
 
+#include <cfloat>
 #include <string>
 
 #include "app/app.h"
@@ -44,6 +45,8 @@ bool viewHasMouse() { return app.stroke || app.paintStroke || app.orbiting || ap
 // input into mouse messages as well; those carry no pressure, so the mouse
 // handlers take it from here when a message comes from the pen.
 float penPressure = 1;
+// The pen touched down with its barrel button held: it orbits until lifted.
+bool barrelOrbit = false;
 
 void readPenPressure(WPARAM wp) {
   POINTER_PEN_INFO pen;
@@ -68,11 +71,41 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   const int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
   switch (msg) {
+    case WM_POINTERLEAVE:
+      // A pen out of range leaves no pointer behind (the tool ring closes).
+      if (POINTER_INPUT_TYPE type; GetPointerType(GET_POINTERID_WPARAM(wp), &type) && type == PT_PEN)
+        ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+      break;
     case WM_POINTERDOWN:
     case WM_POINTERUPDATE:
-      if (POINTER_INPUT_TYPE type; GetPointerType(GET_POINTERID_WPARAM(wp), &type) && type == PT_PEN)
-        readPenPressure(wp);
+    case WM_POINTERUP: {
+      POINTER_INPUT_TYPE type;
+      if (!GetPointerType(GET_POINTERID_WPARAM(wp), &type) || type != PT_PEN) break;
+      if (msg != WM_POINTERUP) readPenPressure(wp);
+      // Tip down with the barrel button held orbits, like the right mouse
+      // button. Windows Ink would only send a right click after lifting, so
+      // these pen messages do not go on to become mouse messages.
+      POINT p{x, y};  // pointer messages carry screen coordinates
+      ScreenToClient(hwnd, &p);
+      if (msg == WM_POINTERDOWN && !viewHasMouse() && !uiWantsMouse()) {
+        POINTER_PEN_INFO pen;
+        if (GetPointerPenInfo(GET_POINTERID_WPARAM(wp), &pen) && (pen.penFlags & PEN_FLAG_BARREL)) {
+          barrelOrbit = true;
+          onMouseDown(WM_RBUTTONDOWN, p.x, p.y, 0, 1);
+          return 0;
+        }
+      }
+      if (barrelOrbit) {
+        if (msg == WM_POINTERUP) {
+          barrelOrbit = false;
+          onMouseUp();
+        } else {
+          onMouseMove(p.x, p.y, 1);
+        }
+        return 0;
+      }
       break;  // on to DefWindowProc, which sends the mouse messages
+    }
     case WM_DPICHANGED: {
       // Moved to a monitor with other scaling: the size Windows suggests
       // keeps the window as large to the eye, and the UI follows.
@@ -213,6 +246,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     else if (a == "--export-obj" && i + 1 < __argc) snapshot.exportObj = __argv[++i];
     else if (a == "--obj-normals") app.exportNormals = true;
     else if (a == "--no-ui") snapshot.ui = false;
+    else if (a == "--tool-ring" && i + 1 < __argc) showToolRingAt(float(std::atof(__argv[++i])));
     else if (a == "--bump-normals") app.showBumpNormals = true;
     else if (a == "--heightmask") app.paint.heightmask = true;
     else if (a == "--cavity") app.paint.heightmask = app.paint.cavity = true;
@@ -268,6 +302,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     updateTitle();
     if (settleFrames > 0) --settleFrames;
     // Idle until the next input, unless the view name under the axes is fading.
-    if (!viewHasMouse() && !relaxing && settleFrames == 0 && !axisLabelFading()) WaitMessage();
+    if (!viewHasMouse() && !relaxing && settleFrames == 0 && !axisLabelFading() && !uiAnimating()) WaitMessage();
   }
 }

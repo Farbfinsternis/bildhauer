@@ -69,6 +69,7 @@ if(WIN32)
     src/app/render.cpp
     src/app/snapshot.cpp
     src/app/settings.cpp
+    src/app/tool_ring.cpp
     src/app/ui.cpp
     src/app/update.cpp
     src/app/widgets.cpp
@@ -114,6 +115,9 @@ add_test(NAME interaction COMMAND interaction_test)
 add_executable(gpu_mesh_test tests/gpu_mesh_test.cpp src/app/gpu_mesh.cpp)
 target_link_libraries(gpu_mesh_test PRIVATE bildhauer_core)
 add_test(NAME gpu_mesh COMMAND gpu_mesh_test)
+add_executable(tool_ring_test tests/tool_ring_test.cpp src/app/tool_ring.cpp)
+target_include_directories(tool_ring_test PRIVATE src)
+add_test(NAME tool_ring COMMAND tool_ring_test)
 add_executable(mesh_tree_test tests/mesh_tree_test.cpp)
 target_link_libraries(mesh_tree_test PRIVATE bildhauer_core)
 add_test(NAME mesh_tree COMMAND mesh_tree_test)

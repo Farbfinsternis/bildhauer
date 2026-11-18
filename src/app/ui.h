@@ -26,6 +26,10 @@ void drawUi();
 
 bool uiWantsMouse();     // the pointer is over the UI or a widget is held
 bool uiWantsKeyboard();  // a text field has the keyboard
+// The UI needs more frames without input (the tool ring rolling or waiting).
+bool uiAnimating();
+// Holds the tool ring at a progress between closed (0) and open (1), for snapshots.
+void showToolRingAt(float progress);
 
 // Paint mode is one way, so entering it asks first (Ctrl+P, menu, button).
 void askEnterPaintMode();

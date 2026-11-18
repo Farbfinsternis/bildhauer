@@ -88,8 +88,10 @@ keystore to allow installation of updates without uninstalling the app.
   through the pen's FIFO and hit test (`FingerGesture.java`), because only the
   render thread can pick the mesh.
 - The UI follows the desktop app, compacted for the tablet: the shared theme
-  and icon widgets (`src/app/widgets.*`) and a tool strip with all eleven
-  tools. As in Sculptris, the brush settings lie in a translucent bar over
+  and icon widgets (`src/app/widgets.*`) and the tool ring at the left edge
+  of the view (a tap opens it and it stays open until a tool or a spot beside
+  it is tapped; the pen also opens it by hovering). The phone keeps its
+  folding tool panel: eleven icons of at least 7 mm do not fit its height. As in Sculptris, the brush settings lie in a translucent bar over
   the top of the view: tool, Size, Strength, Detail, the material sphere, a
   menu (Open, Save, Export OBJ, New sphere); the second row holds the tool's
   options, the pen switches and symmetry. A tab centered under the bar folds

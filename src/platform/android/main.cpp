@@ -113,13 +113,14 @@ struct UiRect {
 };
 struct UiRegions {
   float viewX = 0;
-  UiRect top, tab, bar, axes, side, brush, tools;
+  UiRect top, tab, bar, axes, side, brush, tools, ring;
   bool modal = false;
 } ui;
 
 bool uiAt(float x, float y) {
   return ui.modal || x < ui.viewX || ui.top.contains(x, y) || ui.tab.contains(x, y) || ui.bar.contains(x, y) ||
-         ui.axes.contains(x, y) || ui.side.contains(x, y) || ui.brush.contains(x, y) || ui.tools.contains(x, y);
+         ui.axes.contains(x, y) || ui.side.contains(x, y) || ui.brush.contains(x, y) || ui.tools.contains(x, y) ||
+         ui.ring.contains(x, y);
 }
 
 // The top bar shows its second row (options and pen switches) unless folded.
@@ -135,24 +136,25 @@ void beginFixed(const char* id, ImVec2 pos, ImVec2 size) {
   ImGui::Begin(id, nullptr, kFixed);
 }
 
-// The tools in one column of icon buttons, as on the desktop; the buttons
-// shrink to fit all eleven into the tablet's height.
-void toolStrip(float w, float h) {
-  const ImGuiStyle& st = ImGui::GetStyle();
-  const float gap = 4 * density;
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, st.Colors[ImGuiCol_MenuBarBg]);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {st.FramePadding.x, st.WindowPadding.y});
-  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {st.ItemSpacing.x, gap});
-  beginFixed("##tools", {0,0}, {w,h});
-  const int n = int(Tool::Reduce) + 1;
-  const float button = std::min(ImGui::GetFrameHeight() * 2.3f, (ImGui::GetContentRegionAvail().y - (n - 1) * gap) / n);
-  for (int i = 0; i < n; ++i) {
-    const Tool tool = Tool(i);
-    if (stripButton(toolName(tool), toolIcon(tool), app.brush.tool == tool, nullptr, button)) app.brush.tool = tool;
-  }
-  ImGui::End();
-  ImGui::PopStyleVar(2);
-  ImGui::PopStyleColor();
+// The tools in the tool ring at the left edge of the view (tool_ring.h).
+RingState toolRingState;
+bool ringPressOutside = false;  // a tap beside the open ring, seen by nativePointer
+
+void toolRingPanel() {
+  RingTool tools[int(Tool::Reduce) + 1];
+  const int count = int(std::size(tools));
+  for (int i = 0; i < count; ++i) tools[i] = {toolIcon(Tool(i)), toolName(Tool(i)), nullptr};
+  RingPlace place;
+  place.edge = app.viewX + insetLeft;
+  place.top = ui.top.y1;
+  place.bottom = app.viewY + app.viewH - insetBottom;
+  place.pxPerMm = 160 * density / 25.4f;
+  place.stroke = bool(app.stroke);
+  place.pressOutside = ringPressOutside;
+  ringPressOutside = false;
+  const RingResult r = toolRing(toolRingState, RingSettings(), tools, count, int(app.brush.tool), place);
+  if (r.region) ui.ring.set(r.min, {r.max.x - r.min.x, r.max.y - r.min.y});
+  if (r.picked >= 0) app.brush.tool = Tool(r.picked);
 }
 
 // A square button of the frame height with the menu's three lines, drawn
@@ -514,13 +516,12 @@ int phoneUi() {
 }
 
 int tabletUi() {
-  const float strip = 76 * density;
-  app.viewX = int(strip); app.viewY = 0;
-  app.viewW = std::max(1, app.width - app.viewX); app.viewH = std::max(1, app.height);
+  app.viewX = 0; app.viewY = 0;
+  app.viewW = std::max(1, app.width); app.viewH = std::max(1, app.height);
   ui.viewX = float(app.viewX);
-  toolStrip(strip, float(app.height));
-  const int action = topBar(strip, float(app.viewW));
+  const int action = topBar(0, float(app.viewW));
   foldTab(ui.top.y1, barOpen);
+  toolRingPanel();
   // The axes top right under the bar, as on the desktop; a bit larger for fingers.
   const float axes = 110 * density, pad = 10 * density;
   const ImVec2 axesAt(app.viewX + app.viewW - axes - pad, ui.top.y1 + pad);
@@ -612,9 +613,9 @@ Java_org_bildhauer_app_MainActivity_nativeFrame(JNIEnv*,jclass) {
   renderMobileScene();
   ImGui::Render(); ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
   // Bit 8 asks Java for another frame: stroke, mesh cleanup, save pending or
-  // the view name under the axes still fading.
+  // the view name under the axes still fading, or the tool ring rolling or waiting.
   const bool busy=app.stroke || app.pendingGrab.valid || !app.mesh.dirtyVertices.empty() || savePending ||
-                  axisLabelFading();
+                  axisLabelFading() || (!phone && toolRingState.busy());
   return action | (busy ? 0x100 : 0);
 }
 
@@ -630,6 +631,8 @@ Java_org_bildhauer_app_MainActivity_nativePointer(JNIEnv*,jclass,jint action,jfl
     if (uiPointer) io.AddMouseButtonEvent(0,true);
     // A tap beside an open panel only closes it, whatever lies under the tap.
     else if (toolsOpen || settingsOpen) { toolsOpen=settingsOpen=false; viewDrag=ViewDrag::Held; }
+    // So does a tap beside the open tool ring.
+    else if (!phone && !toolRingState.closed()) { ringPressOutside=true; viewDrag=ViewDrag::Held; }
     else if (!inputAt(int(x),int(y)).hit) { viewDrag=ViewDrag::Orbit; orbitX=x; orbitY=y; }
     else beginStroke(int(x),int(y),invert || button,smoothing,strength);
   } else if (action==1 && viewDrag!=ViewDrag::Off) {
@@ -648,6 +651,8 @@ Java_org_bildhauer_app_MainActivity_nativePointer(JNIEnv*,jclass,jint action,jfl
   } else if (action==5) {
     // Leaving hover is separate from ACTION_CANCEL (action 3).
     if (!app.stroke && !uiPointer) app.hover={};
+    // A pen out of range leaves no pointer behind (the tool ring closes).
+    if (!uiPointer) io.AddMousePosEvent(-FLT_MAX,-FLT_MAX);
   } else if (action==2 || action==3) {
     if (uiPointer) io.AddMouseButtonEvent(0,false);
     // A lifted finger leaves no pointer behind: without this, ImGui would keep

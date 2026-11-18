@@ -79,11 +79,11 @@ bool accentSelectable(const char* label, bool selected, const ImVec2& size = ImV
   return clicked;
 }
 
-// Fixed layout: menu bar on top, status bar at the bottom, the tool strip and
-// the brush panel on the left, the model panel on the right; the 3D view
-// gets the rest.
+// Fixed layout: menu bar on top, status bar at the bottom, the brush panel on
+// the left, the model panel on the right; the 3D view gets the rest. The tools
+// are in the tool ring at the left edge of the view.
 struct Layout {
-  float top, bottom, strip, panel, side;
+  float top, bottom, panel, side;
 };
 
 Layout layout() {
@@ -91,7 +91,7 @@ Layout layout() {
   const float s = st.FontScaleDpi;
   // Before the first frame there is no font size yet: estimate the bars.
   const float bar = ImGui::GetFontSize() > 0 ? ImGui::GetFrameHeight() : 16 * s + 2 * st.FramePadding.y;
-  return {bar, bar, 84 * s, 270 * s, 250 * s};
+  return {bar, bar, 270 * s, 250 * s};
 }
 
 bool beginPanel(const char* id, float x, float w) {
@@ -178,31 +178,43 @@ void menuBar() {
 
 void sculptMaskPanel();
 
-// The tools of the current mode, one button per row.
-void toolStrip() {
-  const Layout l = layout();
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetStyle().FramePadding.x, ImGui::GetStyle().WindowPadding.y));
-  if (beginPanel("##tools", 0, l.strip)) {
-    char tip[64];
-    if (!app.paintMode) {
-      for (const ToolButton& b : kSculptTools) {
-        std::snprintf(tip, sizeof tip, "%s (%s)", toolName(b.tool), b.key);
-        if (stripButton(toolName(b.tool), toolIcon(b.tool), app.brush.tool == b.tool, tip)) app.brush.tool = b.tool;
-      }
-    } else {
-      const PaintTool tools[] = {PaintTool::Color, PaintTool::Bump, PaintTool::FlattenBump};
-      const char* labels[] = {"Color", "Bump", "Flatten"};
-      const char* keys[] = {"D", "B", "F"};
-      for (int i = 0; i < 3; ++i) {
-        std::snprintf(tip, sizeof tip, "%s (%s)", paintToolName(tools[i]), keys[i]);
-        if (stripButton(labels[i], paintToolIcon(tools[i]), app.paint.tool == tools[i], tip)) app.paint.tool = tools[i];
-      }
+// The tools of the current mode in the tool ring at the left edge of the view.
+RingState toolRingState;
+bool toolRingPaint = false;  // the mode the ring shows; a switch closes it
+float toolRingShown = -1;    // >= 0: held at this progress (snapshots)
+
+void toolRingPanel() {
+  if (toolRingPaint != app.paintMode) {
+    toolRingPaint = app.paintMode;
+    toolRingState.reset(0);
+  }
+  RingTool tools[std::size(kSculptTools)];
+  int count = 0, active = 0;
+  if (!app.paintMode) {
+    for (const ToolButton& b : kSculptTools) {
+      if (app.brush.tool == b.tool) active = count;
+      tools[count++] = {toolIcon(b.tool), toolName(b.tool), b.key};
+    }
+  } else {
+    const PaintTool paint[] = {PaintTool::Color, PaintTool::Bump, PaintTool::FlattenBump};
+    const char* keys[] = {"D", "B", "F"};
+    for (int i = 0; i < 3; ++i) {
+      if (app.paint.tool == paint[i]) active = count;
+      tools[count++] = {paintToolIcon(paint[i]), paintToolName(paint[i]), keys[i]};
     }
   }
-  ImGui::End();
-  ImGui::PopStyleVar();
-  ImGui::PopStyleColor();
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  RingPlace place;
+  place.edge = vp->Pos.x + app.viewX;
+  place.top = vp->Pos.y + app.viewY;
+  place.bottom = place.top + app.viewH;
+  place.pxPerMm = 96 * ImGui::GetStyle().FontScaleDpi / 25.4f;
+  place.stroke = app.stroke || app.paintStroke;
+  if (toolRingShown >= 0) toolRingState.show(toolRingShown, active);
+  const RingResult r = toolRing(toolRingState, RingSettings(), tools, count, active, place);
+  if (r.picked < 0) return;
+  if (!app.paintMode) app.brush.tool = kSculptTools[r.picked].tool;
+  else app.paint.tool = r.picked == 0 ? PaintTool::Color : r.picked == 1 ? PaintTool::Bump : PaintTool::FlattenBump;
 }
 
 void penPressureBox() {
@@ -530,7 +542,7 @@ void paintModelPanel() {
 
 void panels() {
   const Layout l = layout();
-  if (beginPanel("##brush", l.strip, l.panel)) {
+  if (beginPanel("##brush", 0, l.panel)) {
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.62f);
     if (app.paintMode) paintBrushPanel();
     else sculptBrushPanel();
@@ -800,7 +812,7 @@ void layoutView(bool withUi) {
   app.viewH = app.height;
   if (!withUi || !ImGui::GetCurrentContext()) return;
   const Layout l = layout();
-  app.viewX = int(l.strip + l.panel);
+  app.viewX = int(l.panel);
   app.viewY = int(l.top);
   app.viewW = std::max(1, app.width - app.viewX - int(l.side));
   app.viewH = std::max(1, app.height - app.viewY - int(l.bottom));
@@ -821,7 +833,7 @@ void drawUi() {
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
   menuBar();
-  toolStrip();
+  toolRingPanel();
   panels();
   {
     const float s = ImGui::GetStyle().FontScaleDpi, size = 92 * s, pad = 8 * s;
@@ -836,6 +848,10 @@ void drawUi() {
 }
 
 bool uiWantsMouse() { return ImGui::GetIO().WantCaptureMouse; }
+
+bool uiAnimating() { return toolRingState.busy(); }
+
+void showToolRingAt(float progress) { toolRingShown = progress; }
 
 bool uiWantsKeyboard() { return ImGui::GetIO().WantTextInput || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId); }
 

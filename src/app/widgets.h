@@ -37,3 +37,36 @@ void axisGizmo(ImVec2 pos, float size);
 bool axisLabelFading();
 
 }  // namespace bh::viewer
+
+#include "app/tool_ring.h"
+
+namespace bh::viewer {
+
+// One tool of the tool ring. `key` may be null (no keyboard).
+struct RingTool {
+  Icon icon;
+  const char* name;
+  const char* key;
+};
+
+// Where the ring sits and what it needs from the frame.
+struct RingPlace {
+  float edge = 0;            // left edge of the 3D view, pixels
+  float top = 0, bottom = 0; // the view's height range, pixels
+  float pxPerMm = 1;         // screen pixels per millimeter
+  bool stroke = false;       // a sculpt or paint stroke is running
+  bool pressOutside = false; // a tap beside the ring that the UI did not see
+};
+
+struct RingResult {
+  int picked = -1;           // tool chosen this frame, or -1
+  bool region = false;       // the ring takes input in [min, max]
+  ImVec2 min, max;
+};
+
+// The tool ring (tool_ring.h) at the left edge of the view. Keeps its state
+// in `state`; `active` is the current tool's index in `tools`.
+RingResult toolRing(RingState& state, const RingSettings& settings, const RingTool* tools, int count, int active,
+                    const RingPlace& place);
+
+}  // namespace bh::viewer

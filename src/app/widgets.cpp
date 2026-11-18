@@ -1,6 +1,10 @@
 #include "app/widgets.h"
 
 #include <algorithm>
+#include <cfloat>
+#include <cmath>
+#include <cstdio>
+#include <vector>
 
 #include "app/app.h"
 #include "app/document.h"
@@ -233,5 +237,128 @@ void axisGizmo(ImVec2 pos, float size) {
 }
 
 bool axisLabelFading() { return labelAlpha() > 0; }
+
+}  // namespace bh::viewer
+
+namespace bh::viewer {
+
+RingResult toolRing(RingState& state, const RingSettings& settings, const RingTool* tools, int count, int active,
+                    const RingPlace& place) {
+  RingResult result;
+  if (count <= 0) return result;
+  const ImGuiIO& io = ImGui::GetIO();
+  const float mm = place.pxPerMm;
+  const RingSize size = ringSize((place.bottom - place.top) / mm, count);
+  RingGeometry g;
+  g.count = count;
+  g.edge = place.edge;
+  g.centerY = (place.top + place.bottom) / 2;
+  g.diameter = size.diameter * mm;
+  g.gap = size.gap * mm;
+  g.visible = ringVisible(settings, size.diameter);
+  g.margin = 1.5f * mm;
+  const float d = g.diameter, radius = d / 2;
+
+  // What the pointer does, measured against the geometry of the last frame's
+  // progress (what the user saw).
+  std::vector<RingPoint> points = ringPoints(g, state.eased(), state.reference());
+  const bool pointer = ImGui::IsMousePosValid();
+  const ImVec2 m = io.MousePos;
+  auto distance = [&](const RingPoint& p) { return std::hypot(m.x - p.x, m.y - p.y); };
+  const RingPoint closedAt = ringPoints(g, 0, active)[size_t(active)];
+  RingInput in;
+  in.dt = io.DeltaTime;
+  in.active = active;
+  in.stroke = place.stroke;
+  in.pointer = pointer;
+  in.overIcon = pointer && m.x >= g.edge && distance(closedAt) <= radius;
+  in.nearIcon = pointer && distance(closedAt) <= radius + d;
+  // The box of all icons the user sees, with half a diameter around it.
+  float x0 = g.edge, y0 = FLT_MAX, x1 = g.edge, y1 = -FLT_MAX;
+  const float shown = state.closed() ? 0 : std::min(1.0f, state.progress() * 4);
+  for (int i = 0; i < count; ++i) {
+    if (i != state.reference() && shown <= 0) continue;
+    const RingPoint& p = points[size_t(i)];
+    x1 = std::max(x1, p.x + radius);
+    y0 = std::min(y0, p.y - radius);
+    y1 = std::max(y1, p.y + radius);
+  }
+  in.insideColumn = pointer && m.x >= g.edge && m.x <= x1 + radius && m.y >= y0 - radius && m.y <= y1 + radius;
+  in.pressOutside = place.pressOutside || (ImGui::IsMouseClicked(0) && !in.insideColumn);
+
+  // The window takes the clicks over the visible icons; skipped while the
+  // icon is faded out for a stroke, so the stroke goes on beneath it.
+  const bool visible = state.iconAlpha() > 0 && !(state.closed() && state.hidden());
+  if (visible && x1 > x0 && y1 > y0) {
+    const ImVec2 pos(x0, y0), extent(x1 - x0, y1 - y0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1, 1));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::SetNextWindowPos(pos);
+    ImGui::SetNextWindowSize(extent);
+    ImGui::Begin("##toolring", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoScrollWithMouse);
+    result.region = true;
+    result.min = pos;
+    result.max = ImVec2(x1, y1);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImGuiStyle& st = ImGui::GetStyle();
+    int hovered = -1;
+    for (int i = 0; i < count; ++i) {
+      const bool reference = i == state.reference();
+      const float alpha = (reference ? 1.0f : shown) * state.iconAlpha();
+      if (alpha <= 0) continue;
+      const RingPoint& p = points[size_t(i)];
+      ImGui::SetCursorScreenPos(ImVec2(p.x - radius, p.y - radius));
+      ImGui::PushID(i);
+      const bool clicked = ImGui::InvisibleButton("##ringtool", ImVec2(d, d));
+      const bool over = ImGui::IsItemHovered();
+      ImGui::PopID();
+      if (state.open()) {
+        if (over) hovered = i;
+        if (clicked) in.picked = i;
+      } else if (reference && clicked && state.closed()) {
+        in.tapIcon = true;
+      }
+      const bool selected = i == active;
+      ImVec4 fill = st.Colors[selected ? ImGuiCol_ButtonActive : (over && state.open()) ? ImGuiCol_ButtonHovered
+                                                                                     : ImGuiCol_Button];
+      ImVec4 back = st.Colors[ImGuiCol_PopupBg];
+      back.w = alpha;
+      fill.w *= alpha;
+      ImVec4 border = st.Colors[ImGuiCol_Border];
+      border.w = alpha;
+      ImVec4 ink = st.Colors[ImGuiCol_Text];
+      ink.w = alpha;
+      const ImVec2 c(p.x, p.y);
+      dl->AddCircleFilled(c, radius, ImGui::GetColorU32(back), 48);
+      dl->AddCircleFilled(c, radius, ImGui::GetColorU32(fill), 48);
+      dl->AddCircle(c, radius, ImGui::GetColorU32(border), 48, std::max(1.0f, mm * 0.2f));
+      ImU32 paint = paintColor();
+      paint = (paint & 0x00FFFFFF) | (ImU32(((paint >> 24) & 0xFF) * alpha) << 24);
+      drawIcon(dl, tools[i].icon, c, d * 0.62f, ImGui::GetColorU32(ink), paint);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+    // The name of the icon under the pointer beside the column, at once:
+    // the icons carry no labels.
+    if (hovered >= 0) {
+      char label[64];
+      if (tools[hovered].key) std::snprintf(label, sizeof label, "%s (%s)", tools[hovered].name, tools[hovered].key);
+      else std::snprintf(label, sizeof label, "%s", tools[hovered].name);
+      const RingPoint& p = points[size_t(hovered)];
+      const ImVec2 ts = ImGui::CalcTextSize(label), pad = st.FramePadding;
+      const ImVec2 at(p.x + radius + 2 * mm, p.y - ts.y / 2 - pad.y);
+      ImDrawList* fg = ImGui::GetForegroundDrawList();
+      fg->AddRectFilled(at, ImVec2(at.x + ts.x + 2 * pad.x, at.y + ts.y + 2 * pad.y),
+                        ImGui::GetColorU32(ImGuiCol_PopupBg), st.FrameRounding);
+      fg->AddText(ImVec2(at.x + pad.x, at.y + pad.y), ImGui::GetColorU32(ImGuiCol_Text), label);
+    }
+  }
+  result.picked = state.update(settings, in);
+  return result;
+}
 
 }  // namespace bh::viewer
