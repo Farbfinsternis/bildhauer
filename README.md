@@ -59,6 +59,7 @@ down.
 | Right mouse or Alt + left | turn the view |
 | Middle mouse | move the view |
 | Wheel | zoom |
+| Space | brush menu: size, strength and the brush's options around the pointer (hold, or tap to keep it open) |
 | `[` `]` | brush size (with Ctrl: strength) |
 | Ctrl+Z | undo |
 
@@ -67,7 +68,7 @@ Help > Mouse and keys.
 
 **With a pen tablet** (Wacom, Cintiq, Surface Pen and others), pressing
 harder makes the stroke stronger, both when sculpting and when painting.
-"Pen pressure" in the brush panel switches this off. With a Wacom tablet,
+"Pen pressure" in the brush menu (Space) switches this off. With a Wacom tablet,
 "Use Windows Ink" must be on in the Wacom Tablet Properties (it is on by
 default).
 

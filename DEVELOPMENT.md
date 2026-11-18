@@ -147,14 +147,15 @@ Paintling's spec 007): closed, only the current tool shows as a circle cut by
 the edge; hovering over it for 0.3 s, or clicking it, rolls it out into a
 column of all tools (own icons, drawn as vector shapes: `src/app/icons.cpp`),
 and after a choice it rolls back in around the new tool. Space opens the brush menu around
-the pointer (`src/app/brush_menu.*`, prototype beside the brush panel):
+the pointer (`src/app/brush_menu.*`):
 Size and Strength as arcs, the tool's switches as segments at the bottom,
 the middle free; held, it closes with the key, tapped, it stays open until
 Space, Escape or a click beside it. Segments with an arrow open a panel
 beside the ring (the second level): the brush mask (Draw, Smooth, Flatten),
 in paint mode Colors, Brush (hardness, angle falloff, fill) and Stamp (with
-the heightmask). Left of the view is the panel of the current tool (sliders, options, brush mask;
-in paint mode also colors, stamp and heightmask); the panel on the right
+the heightmask); resting on the title shows what the tool does. Pointing at
+or dragging Size fades the ring, so the brush circle on the model shows
+through it. The panel on the right
 holds what concerns the whole model (symmetry, subdivide, reduce; in paint
 mode the material layers). In the view, the axes at the top right show the
 camera and turn it to a side on click; the bar at the bottom frames the model
@@ -187,7 +188,7 @@ F Flatten bump; with Shift `[` `]` change the hardness; N shows the bump
 normal map. Ctrl+F fills the whole color layer (or the edited layer's mask)
 with the primary color, or with a bump tool clears the bump, as far as the
 Strength slider says; Ctrl+Shift+F fills with the secondary color or empties
-the mask. The Stamp section of the panel loads a brush mask (shapes where a
+the mask. The Stamp panel of the brush menu loads a brush mask (shapes where a
 dab paints, from the image's brightness) and a brush texture (Paint color
 paints its colors, the bump tools its brightness) from image files, for
 example Sculptris' `textures` folder; the stamp lies in the screen plane,
@@ -205,9 +206,9 @@ exist.
 
 `--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]
 [--brush-mask image] [--brush-texture image] [--heightmask] [--cavity]
-[--export-obj file.obj] [--obj-normals] [--tool-ring 0..1] [--brush-menu] [--brush-menu-panel n]`
+[--export-obj file.obj] [--obj-normals] [--tool-ring 0..1] [--brush-menu] [--brush-menu-panel n] [--brush-menu-size]`
 renders one frame (after a few demo strokes, in paint mode with paint strokes
-and a gold layer; --brush-mask also shapes the sculpt strokes; --save saves as `<name>_bildhauer.sc1` first; --tool-ring holds the tool ring between closed and open; --brush-menu shows the brush menu open, --brush-menu-panel with segment n's panel) and exits.
+and a gold layer; --brush-mask also shapes the sculpt strokes; --save saves as `<name>_bildhauer.sc1` first; --tool-ring holds the tool ring between closed and open; --brush-menu shows the brush menu open, --brush-menu-panel with segment n's panel, --brush-menu-size with Size pointed at and the ring faded) and exits.
 
 The test data is not part of the repository. By default the tests use the
 `.sc1` files from `BILDHAUER_SCULPTRIS_DIR` (`data/`, `models/`) and
@@ -254,12 +255,12 @@ Implementation:
 | OBJ export as Sculptris writes it (export transform, mirrored half, UVs in paint mode, quads) | done (`src/io/obj`, File menu); re/docs/obj.md, read back and checked on all samples |
 | Edge split, brush tessellation, collapse, reduction, beautify, subdivision (incl. quads) | done (`src/core`); topology kept on all samples and a quad cube |
 | Brushes (all 11), strokes, picking | done (`src/core`); tested on all samples |
-| Sculpt brush mask (Draw, Smooth, Flatten) | done (`src/core/brush`, Sculpt panel); after brushes.md 3.4 |
+| Sculpt brush mask (Draw, Smooth, Flatten) | done (`src/core/brush`, brush menu); after brushes.md 3.4 |
 | Viewer: matcap rendering, mirrored half, sculpting, undo, open/save | done (`src/app`) |
-| UI: tool ring with own icons, brush and model panels, mode switch, axes and view bar, status bar hints | done (`src/app/ui`, `src/app/icons`, Dear ImGui) |
-| Symmetry switching with plane-valence reduction | done (`src/core/symmetry`); on and off on all samples, quads kept; Sculpt panel and Edit menu |
+| UI: tool ring with own icons, brush menu (Space) with panels, model panel, mode switch, axes and view bar, status bar hints | done (`src/app/ui`, `src/app/icons`, Dear ImGui) |
+| Symmetry switching with plane-valence reduction | done (`src/core/symmetry`); on and off on all samples, quads kept; model panel and Edit menu |
 | Paint mode: texture mapping (own UV atlas; stored .sc1 UVs, images and materials decoded) | done (`src/core/texmap`, `src/io`); atlas checked on all samples, packing coverage 23-50 % |
-| Paint mode: brush mask and brush texture (stamps), Fill/Clear, heightmask | done (`src/core/paint`, panel); stamp frame, depth falloff, stamp building and heightmask ramps after paint.md 3.2, 3.3, 3.6 |
+| Paint mode: brush mask and brush texture (stamps), Fill/Clear, heightmask | done (`src/core/paint`, brush menu); stamp frame, depth falloff, stamp building and heightmask ramps after paint.md 3.2, 3.3, 3.6 |
 | Paint mode: painting (color, bump, flatten), bump normals, tile undo | done (`src/core/paint`); formulas checked against paint.md, stored images load unchanged |
 | Paint mode: matcap shading with bump, material layers, saving paint data | done (`src/app`, `src/core/paint`, `src/io`); saved files load back identically and open in Sculptris Alpha 6 without visible differences (checked by hand 2026-10-21) |
 

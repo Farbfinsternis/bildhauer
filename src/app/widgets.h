@@ -1,8 +1,8 @@
 #pragma once
 
 // The look and the icon widgets shared by the desktop and the tablet UI: the
-// slate and amber theme, the tool strip buttons, the round view buttons and
-// the panel title with the tool icon.
+// slate and amber theme, the tool strip buttons, the round view buttons, the
+// tool ring and the brush menu.
 
 #include "app/icons.h"
 #include "core/brush.h"
@@ -15,9 +15,6 @@ void applyStyle(float scale);
 
 // The paint color as an ImGui color (canvas colors are 0x00BBGGRR).
 ImU32 paintColor();
-
-// The tool icon, a larger title beside it, and a short description below.
-void panelTitle(Icon icon, const char* title, const char* description);
 
 const char* toolDescription(Tool tool);
 
@@ -97,14 +94,19 @@ struct BrushMenu {
   MenuHit pressed;      // where the current click started
   int flyout = -1;      // the segment whose panel is open
   float flyoutHeight = 0;  // of that panel last frame, to keep it on screen
+  float titleHover = 0;   // s over the title: the description shows after a moment
+  float see = 1;          // ring opacity: lower while Size is pointed at, to show the brush circle on the model
 };
 
 // Draws the open brush menu (brush_menu.h) around `menu.center` and takes
 // its clicks; a click beside it closes it. `size` runs from `sizeMin` to 1,
-// `strength` from 0 to 1. A flyout segment's panel is drawn by
+// `strength` from 0 to 1; `description` shows when the pointer rests on the
+// title. A flyout segment's panel is drawn by
 // `flyout(segment)` with ordinary ImGui widgets. Returns the index of a
-// button segment clicked.
-int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float sizeMin, float* strength,
-              const MenuSegment* segments, int count, float scale, void (*flyout)(int segment) = nullptr);
+// button segment clicked. While Size is pointed at or dragged the ring
+// fades, so the brush circle on the model shows through.
+int brushMenu(BrushMenu& menu, const char* title, Icon icon, const char* description, float* size, float sizeMin,
+              float* strength, const MenuSegment* segments, int count, float scale,
+              void (*flyout)(int segment) = nullptr);
 
 }  // namespace bh::viewer

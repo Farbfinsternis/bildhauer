@@ -255,6 +255,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     else if (a == "--obj-normals") app.exportNormals = true;
     else if (a == "--no-ui") snapshot.ui = false;
     else if (a == "--brush-menu") showBrushMenu();
+    else if (a == "--brush-menu-size") showBrushMenu(-2);
     else if (a == "--brush-menu-panel" && i + 1 < __argc) showBrushMenu(std::atoi(__argv[++i]));
     else if (a == "--tool-ring" && i + 1 < __argc) showToolRingAt(float(std::atof(__argv[++i])));
     else if (a == "--bump-normals") app.showBumpNormals = true;

@@ -66,23 +66,6 @@ void applyStyle(float scale) {
 
 ImU32 paintColor() { return app.paint.primary | 0xFF000000u; }
 
-void panelTitle(Icon icon, const char* title, const char* description) {
-  ImGui::PushFont(nullptr, ImGui::GetFontSize() / ImGui::GetStyle().FontScaleDpi * 1.6f);
-  const float side = ImGui::GetFontSize() * 1.5f;
-  const ImVec2 p = ImGui::GetCursorScreenPos();
-  drawIcon(ImGui::GetWindowDrawList(), icon, ImVec2(p.x + side / 2, p.y + side / 2), side,
-           ImGui::GetColorU32(ImGuiCol_Text), paintColor());
-  ImGui::Dummy(ImVec2(side, side));
-  ImGui::SameLine();
-  ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (side - ImGui::GetFontSize()) / 2);
-  ImGui::TextUnformatted(title);
-  ImGui::PopFont();
-  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-  ImGui::TextWrapped("%s", description);
-  ImGui::PopStyleColor();
-  ImGui::Spacing();
-}
-
 const char* toolDescription(Tool tool) {
   switch (tool) {
     case Tool::Draw: return "Builds up the surface along the stroke. Clay: flatter, layered build-up.";
@@ -398,8 +381,8 @@ void centeredText(ImDrawList* dl, ImVec2 at, ImU32 color, const char* text) {
 
 }  // namespace
 
-int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float sizeMin, float* strength,
-              const MenuSegment* segments, int count, float scale, void (*flyout)(int segment)) {
+int brushMenu(BrushMenu& menu, const char* title, Icon icon, const char* description, float* size, float sizeMin,
+              float* strength, const MenuSegment* segments, int count, float scale, void (*flyout)(int segment)) {
   if (!menu.open) return -1;
   // The tool may have changed under an open panel (keys).
   if (menu.flyout >= count || (menu.flyout >= 0 && !segments[menu.flyout].flyout)) menu.flyout = -1;
@@ -407,7 +390,7 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
   const ImVec2 padding = ImGui::GetStyle().WindowPadding;
   menu.alpha = std::min(1.0f, menu.alpha + io.DeltaTime / 0.1f);
   menu.held += io.DeltaTime;
-  const float alpha = menu.alpha;
+  const float full = menu.alpha;
   MenuRadii r;
   r.inner = 70 * scale;
   r.outer = 165 * scale;
@@ -466,6 +449,14 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
     menu.drag = MenuZone::None;
   }
 
+  // While Size is pointed at or dragged, the ring turns see-through except for
+  // the Size arc, so the brush circle on the model shows its new size.
+  const MenuZone over = menu.drag != MenuZone::None ? menu.drag : hit.zone;
+  const bool preview = over == MenuZone::Size;
+  const float seeStep = io.DeltaTime / 0.12f;
+  menu.see = preview ? std::max(0.25f, menu.see - seeStep) : std::min(1.0f, menu.see + seeStep);
+  const float alpha = full * menu.see;
+
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const ImGuiStyle& st = ImGui::GetStyle();
   const float band = r.outer - r.inner, mid = (r.inner + r.outer) / 2, line = std::max(1.0f, scale);
@@ -476,7 +467,8 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
   dl->AddCircle(c, mid, ImGui::GetColorU32(bgv), 96, band);
   dl->AddCircle(c, r.outer, border, 96, line);
   dl->AddCircle(c, r.inner, border, 96, line);
-  const MenuZone over = menu.drag != MenuZone::None ? menu.drag : hit.zone;
+  menu.titleHover = over == MenuZone::Title && ImGui::IsItemHovered() ? menu.titleHover + io.DeltaTime : 0;
+  if (description && *description && menu.titleHover > 0.4f) ImGui::SetTooltip("%s", description);
 
   // Title.
   fillBand(dl, c, r.inner, r.outer, -kMenuTitleHalf, kMenuTitleHalf, withAlpha(ImGuiCol_ButtonActive, alpha));
@@ -496,23 +488,24 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
   for (const bool left : {true, false}) {
     const float v = left ? (*size - sizeMin) / (1 - sizeMin) : *strength;
     const float sign = left ? -1.0f : 1.0f;
+    const float a = left ? full : alpha;  // Size stays solid while the rest fades
     if (over == (left ? MenuZone::Size : MenuZone::Strength))
       fillBand(dl, c, r.inner, r.outer, sign * kMenuArcFrom, sign * kMenuArcTo,
-               withAlpha(ImGuiCol_ButtonHovered, alpha * 0.6f));
+               withAlpha(ImGuiCol_ButtonHovered, a * 0.6f));
     auto stroke = [&](float from, float to, ImU32 color) {
       dl->PathArcTo(c, track, imAngle(std::min(from, to)), imAngle(std::max(from, to)), 32);
       dl->PathStroke(color, ImDrawFlags_None, thick);
     };
-    stroke(sign * kMenuArcFrom, sign * kMenuArcTo, withAlpha(ImGuiCol_FrameBg, alpha));
+    stroke(sign * kMenuArcFrom, sign * kMenuArcTo, withAlpha(ImGuiCol_FrameBg, a));
     const float at = arcAngle(v, left);
-    if (v > 0) stroke(sign * kMenuArcTo, at, withAlpha(ImGuiCol_SliderGrabActive, alpha));
-    dl->AddCircleFilled(onCircle(c, track, at), thick * 1.3f, ink, 24);
+    if (v > 0) stroke(sign * kMenuArcTo, at, withAlpha(ImGuiCol_SliderGrabActive, a));
+    dl->AddCircleFilled(onCircle(c, track, at), thick * 1.3f, withAlpha(ImGuiCol_Text, a), 24);
     char value[16];
     std::snprintf(value, sizeof value, "%.2f", left ? *size : *strength);
     const ImVec2 p = onCircle(c, (r.inner + track) / 2 - 4 * scale, sign * 75);
     const float lh = ImGui::GetTextLineHeight();
-    centeredText(dl, ImVec2(p.x, p.y - lh / 2), dim, left ? "Size" : "Strength");
-    centeredText(dl, ImVec2(p.x, p.y + lh / 2), ink, value);
+    centeredText(dl, ImVec2(p.x, p.y - lh / 2), withAlpha(ImGuiCol_TextDisabled, a), left ? "Size" : "Strength");
+    centeredText(dl, ImVec2(p.x, p.y + lh / 2), withAlpha(ImGuiCol_Text, a), value);
   }
 
   // Segments: name, and a box for switches.

@@ -79,11 +79,11 @@ bool accentSelectable(const char* label, bool selected, const ImVec2& size = ImV
   return clicked;
 }
 
-// Fixed layout: menu bar on top, status bar at the bottom, the brush panel on
-// the left, the model panel on the right; the 3D view gets the rest. The tools
-// are in the tool ring at the left edge of the view.
+// Fixed layout: menu bar on top, status bar at the bottom, the model panel on
+// the right; the 3D view gets the rest. The tools are in the tool ring at the
+// left edge of the view, their settings in the brush menu (Space).
 struct Layout {
-  float top, bottom, panel, side;
+  float top, bottom, side;
 };
 
 Layout layout() {
@@ -91,7 +91,7 @@ Layout layout() {
   const float s = st.FontScaleDpi;
   // Before the first frame there is no font size yet: estimate the bars.
   const float bar = ImGui::GetFontSize() > 0 ? ImGui::GetFrameHeight() : 16 * s + 2 * st.FramePadding.y;
-  return {bar, bar, 270 * s, 250 * s};
+  return {bar, bar, 250 * s};
 }
 
 bool beginPanel(const char* id, float x, float w) {
@@ -246,6 +246,11 @@ void brushMenuPanel() {
     openBrushMenu();
     brushMenuState.alpha = 1;
     brushMenuState.flyout = brushMenuShownFlyout;
+    if (brushMenuShownFlyout == -2) {  // Size pointed at: the ring faded
+      brushMenuState.flyout = -1;
+      brushMenuState.drag = MenuZone::Size;
+      brushMenuState.see = 0.25f;
+    }
   }
   if (!brushMenuState.open) return;
   MenuSegment segments[4];
@@ -283,8 +288,8 @@ void brushMenuPanel() {
     // Only these three use the brush mask (brushes.md 3.4).
     if (tool == Tool::Draw || tool == Tool::Smooth || tool == Tool::Flatten)
       panel(sculptMaskActive() ? "Mask (on)" : "Brush mask", sculptMaskPanel);
-    const int pressed = brushMenu(brushMenuState, toolName(tool), toolIcon(tool), &s.size, 0.02f, &s.strength, segments,
-                                  count, scale, showFlyout);
+    const int pressed = brushMenu(brushMenuState, toolName(tool), toolIcon(tool), toolDescription(tool), &s.size, 0.02f,
+                                  &s.strength, segments, count, scale, showFlyout);
     if (pressed >= 0 && tool == Tool::Mask) clearMask();
   } else {
     const PaintTool tool = app.paint.tool;
@@ -315,63 +320,9 @@ void brushMenuPanel() {
       ImGui::SeparatorText("Heightmask");
       heightmaskPanel();
     });
-    brushMenu(brushMenuState, paintToolName(tool), paintToolIcon(tool), &ps[0], 0.02f, &ps[1], segments, count, scale,
-              showFlyout);
+    brushMenu(brushMenuState, paintToolName(tool), paintToolIcon(tool), paintToolDescription(tool), &ps[0], 0.02f, &ps[1],
+              segments, count, scale, showFlyout);
   }
-}
-
-void penPressureBox() {
-  ImGui::Checkbox("Pen pressure", &app.penPressure);
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-    ImGui::SetTooltip("Pressing the pen harder makes the stroke stronger.\n"
-                      "With a Wacom tablet, \"Use Windows Ink\" must be on in its settings.");
-}
-
-// The current sculpt brush: its sliders and options, and the brush mask.
-void sculptBrushPanel() {
-  const Tool tool = app.brush.tool;
-  panelTitle(toolIcon(tool), toolName(tool), toolDescription(tool));
-  ToolSliders& s = sliders(tool);
-  ImGui::SeparatorText("Brush");
-  slider("Size", s.size);
-  slider("Strength", s.strength);
-  // Grab, Rotate and Scale follow the pen; pressure does not change them.
-  if (tool != Tool::Grab && tool != Tool::Rotate && tool != Tool::Scale) penPressureBox();
-  auto option = [](const char* label, bool& value, const char* tip) {
-    ImGui::Checkbox(label, &value);
-    if (tip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", tip);
-  };
-  switch (tool) {
-    case Tool::Draw:
-      option("Clay", app.brush.clay, "Flatter, layered build-up (D again)");
-      ImGui::SameLine();
-      option("Soft", app.brush.soft, "With Clay: softer build-up");
-      break;
-    case Tool::Flatten:
-      option("Lock plane", app.brush.lockPlane, "Keep the plane of the stroke's first dab (F again)");
-      option("Angle falloff", app.brush.angleFalloff, "Leave surface that turns away from the plane");
-      break;
-    case Tool::Mask:
-      if (ImGui::Button("Clear mask", ImVec2(-1, 0))) clearMask();
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("Removes the whole mask (Ctrl+Z brings it back)");
-      break;
-    case Tool::Grab:
-      option("Global", app.brush.global, "Move every unmasked vertex (G again)");
-      ImGui::SameLine();
-      option("Limit", app.brush.limit, nullptr);
-      break;
-    case Tool::Rotate: option("Global", app.brush.global, "Turn every unmasked vertex (R again)"); break;
-    case Tool::Scale:
-      option("Global", app.brush.global, "Scale every unmasked vertex (T again)");
-      ImGui::SameLine();
-      option("XYZ", app.brush.xyz, nullptr);
-      break;
-    default: break;
-  }
-  ImGui::Spacing();
-  if (ImGui::CollapsingHeader(sculptMaskActive() ? "Brush mask (on)###brushmask" : "Brush mask###brushmask"))
-    sculptMaskPanel();
 }
 
 // The Sculptris material panel: one sphere per built-in matcap, a click
@@ -603,39 +554,6 @@ void materialPanel() {
   ImGui::TextDisabled(app.editSlot == 0 ? "Paint color paints the color layer" : "Paint color paints this layer's mask");
 }
 
-// The current paint tool: its sliders, fill, colors, stamp and heightmask.
-void paintBrushPanel() {
-  const PaintTool tool = app.paint.tool;
-  panelTitle(paintToolIcon(tool), paintToolName(tool), paintToolDescription(tool));
-  std::array<float, 3>& ps = paintSliders();
-  ImGui::SeparatorText("Brush");
-  slider("Size", ps[0]);
-  slider("Strength", ps[1]);
-  slider("Hardness", ps[2]);
-  penPressureBox();
-  ImGui::Checkbox("Surface angle falloff", &app.paint.angleFalloff);
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-    ImGui::SetTooltip("Leave surface that turns away from the spot under the brush");
-  char fill[64];
-  std::snprintf(fill, sizeof fill, "%s (Ctrl+F)", fillLabel());
-  if (ImGui::Button(fill, ImVec2(-1, 0))) fillLayer(ImGui::GetIO().KeyShift);
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-    ImGui::SetTooltip("The whole layer at once, as far as Strength says.\n"
-                      "With Shift (Ctrl+Shift+F): the secondary color, or an empty mask.");
-
-  ImGui::SeparatorText("Colors");
-  colorEdit("Primary", app.paint.primary);
-  ImGui::SameLine();
-  colorEdit("Secondary", app.paint.secondary);
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Swap")) std::swap(app.paint.primary, app.paint.secondary);
-
-  ImGui::Spacing();
-  if (ImGui::CollapsingHeader(stampsActive() ? "Stamp (on)###stamp" : "Stamp###stamp")) stampPanel();
-  if (ImGui::CollapsingHeader(app.paint.heightmask ? "Heightmask (on)###heightmask" : "Heightmask###heightmask"))
-    heightmaskPanel();
-}
-
 // What concerns the whole model in paint mode: material layers and the view.
 void paintModelPanel() {
   materialPanel();
@@ -645,13 +563,6 @@ void paintModelPanel() {
 
 void panels() {
   const Layout l = layout();
-  if (beginPanel("##brush", 0, l.panel)) {
-    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.62f);
-    if (app.paintMode) paintBrushPanel();
-    else sculptBrushPanel();
-    ImGui::PopItemWidth();
-  }
-  ImGui::End();
   if (beginPanel("##model", ImGui::GetMainViewport()->Size.x - l.side, l.side)) {
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.62f);
     if (app.paintMode) paintModelPanel();
@@ -915,7 +826,7 @@ void layoutView(bool withUi) {
   app.viewH = app.height;
   if (!withUi || !ImGui::GetCurrentContext()) return;
   const Layout l = layout();
-  app.viewX = int(l.panel);
+  app.viewX = 0;
   app.viewY = int(l.top);
   app.viewW = std::max(1, app.width - app.viewX - int(l.side));
   app.viewH = std::max(1, app.height - app.viewY - int(l.bottom));
@@ -953,7 +864,12 @@ void drawUi() {
 
 bool uiWantsMouse() { return ImGui::GetIO().WantCaptureMouse; }
 
-bool uiAnimating() { return toolRingState.busy() || (brushMenuState.open && brushMenuState.alpha < 1); }
+bool uiAnimating() {
+  const BrushMenu& m = brushMenuState;
+  const bool waitingForTip = m.titleHover > 0 && m.titleHover <= 0.4f;
+  const bool fading = m.see > 0.25f && m.see < 1;
+  return toolRingState.busy() || (m.open && (m.alpha < 1 || waitingForTip || fading));
+}
 
 void brushMenuKey(bool down, bool repeat) {
   if (down) {
