@@ -131,13 +131,21 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     case WM_MOUSEMOVE:
       if (viewHasMouse() || !uiWantsMouse()) onMouseMove(x, y, pressure);
-      else app.hover = PickHit{};  // no brush ring over the UI
+      // No brush ring over the UI; the brush menu keeps it where it opened,
+      // so Size shows on the model.
+      else if (!brushMenuOpen()) app.hover = PickHit{};
       return 0;
     case WM_MOUSEWHEEL:
       if (!uiWantsMouse()) onMouseWheel(GET_WHEEL_DELTA_WPARAM(wp));
       return 0;
     case WM_KEYDOWN:
-      if (!uiWantsKeyboard()) onKey(wp);
+      if (uiWantsKeyboard()) return 0;
+      if (wp == VK_SPACE) brushMenuKey(true, (lp & (1 << 30)) != 0);
+      else if (wp == VK_ESCAPE && closeBrushMenu()) {}
+      else onKey(wp);
+      return 0;
+    case WM_KEYUP:
+      if (wp == VK_SPACE) brushMenuKey(false, false);
       return 0;
     case kUpdateCheckedMessage:
       onUpdateChecked();
@@ -246,6 +254,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     else if (a == "--export-obj" && i + 1 < __argc) snapshot.exportObj = __argv[++i];
     else if (a == "--obj-normals") app.exportNormals = true;
     else if (a == "--no-ui") snapshot.ui = false;
+    else if (a == "--brush-menu") showBrushMenu();
     else if (a == "--tool-ring" && i + 1 < __argc) showToolRingAt(float(std::atof(__argv[++i])));
     else if (a == "--bump-normals") app.showBumpNormals = true;
     else if (a == "--heightmask") app.paint.heightmask = true;

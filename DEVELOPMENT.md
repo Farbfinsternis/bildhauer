@@ -146,7 +146,11 @@ the left edge of the view (`src/app/tool_ring.*`, idea and geometry from
 Paintling's spec 007): closed, only the current tool shows as a circle cut by
 the edge; hovering over it for 0.3 s, or clicking it, rolls it out into a
 column of all tools (own icons, drawn as vector shapes: `src/app/icons.cpp`),
-and after a choice it rolls back in around the new tool. Left of the view is the panel of the current tool (sliders, options, brush mask;
+and after a choice it rolls back in around the new tool. Space opens the brush menu around
+the pointer (`src/app/brush_menu.*`, prototype beside the brush panel):
+Size and Strength as arcs, the tool's switches as segments at the bottom,
+the middle free; held, it closes with the key, tapped, it stays open until
+Space, Escape or a click beside it. Left of the view is the panel of the current tool (sliders, options, brush mask;
 in paint mode also colors, stamp and heightmask); the panel on the right
 holds what concerns the whole model (symmetry, subdivide, reduce; in paint
 mode the material layers). In the view, the axes at the top right show the
@@ -198,9 +202,9 @@ exist.
 
 `--snapshot out.png [--demo] [--paint] [--symmetry-off] [--bump-normals] [--save] [--no-ui]
 [--brush-mask image] [--brush-texture image] [--heightmask] [--cavity]
-[--export-obj file.obj] [--obj-normals] [--tool-ring 0..1]`
+[--export-obj file.obj] [--obj-normals] [--tool-ring 0..1] [--brush-menu]`
 renders one frame (after a few demo strokes, in paint mode with paint strokes
-and a gold layer; --brush-mask also shapes the sculpt strokes; --save saves as `<name>_bildhauer.sc1` first; --tool-ring holds the tool ring between closed and open) and exits.
+and a gold layer; --brush-mask also shapes the sculpt strokes; --save saves as `<name>_bildhauer.sc1` first; --tool-ring holds the tool ring between closed and open; --brush-menu shows the brush menu open) and exits.
 
 The test data is not part of the repository. By default the tests use the
 `.sc1` files from `BILDHAUER_SCULPTRIS_DIR` (`data/`, `models/`) and

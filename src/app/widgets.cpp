@@ -362,3 +362,177 @@ RingResult toolRing(RingState& state, const RingSettings& settings, const RingTo
 }
 
 }  // namespace bh::viewer
+
+namespace bh::viewer {
+
+namespace {
+
+constexpr float kDeg = 3.14159265f / 180;
+
+// ImGui's angles start at +x; the menu's at the top.
+float imAngle(float menuDegrees) { return (menuDegrees - 90) * kDeg; }
+
+ImVec2 onCircle(ImVec2 c, float radius, float menuDegrees) {
+  const float a = imAngle(menuDegrees);
+  return ImVec2(c.x + std::cos(a) * radius, c.y + std::sin(a) * radius);
+}
+
+// A band of the ring from `from` to `to` degrees (either order).
+void fillBand(ImDrawList* dl, ImVec2 c, float r0, float r1, float from, float to, ImU32 color) {
+  const float a0 = imAngle(std::min(from, to)), a1 = imAngle(std::max(from, to));
+  dl->PathArcTo(c, r1, a0, a1, 32);
+  dl->PathArcTo(c, r0, a1, a0, 32);
+  dl->PathFillConcave(color);
+}
+
+ImU32 withAlpha(ImGuiCol col, float alpha) {
+  ImVec4 v = ImGui::GetStyleColorVec4(col);
+  v.w *= alpha;
+  return ImGui::GetColorU32(v);
+}
+
+void centeredText(ImDrawList* dl, ImVec2 at, ImU32 color, const char* text) {
+  const ImVec2 ts = ImGui::CalcTextSize(text);
+  dl->AddText(ImVec2(at.x - ts.x / 2, at.y - ts.y / 2), color, text);
+}
+
+}  // namespace
+
+int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float sizeMin, float* strength,
+              const MenuSegment* segments, int count, float scale) {
+  if (!menu.open) return -1;
+  const ImGuiIO& io = ImGui::GetIO();
+  menu.alpha = std::min(1.0f, menu.alpha + io.DeltaTime / 0.1f);
+  menu.held += io.DeltaTime;
+  const float alpha = menu.alpha;
+  MenuRadii r;
+  r.inner = 70 * scale;
+  r.outer = 165 * scale;
+  const ImVec2 c = menu.center;
+  int clicked = -1;
+
+  // The window covers the whole screen while the menu is open, so a click
+  // beside the ring closes it instead of starting a stroke.
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  if (menu.raise) ImGui::SetNextWindowFocus();
+  menu.raise = false;
+  ImGui::SetNextWindowPos(vp->Pos);
+  ImGui::SetNextWindowSize(vp->Size);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+  ImGui::Begin("##brushmenu", nullptr,
+               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                   ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::SetCursorScreenPos(vp->Pos);
+  ImGui::InvisibleButton("##menuarea", vp->Size);
+  const ImVec2 m = io.MousePos;
+  const MenuHit hit = menuHit(m.x - c.x, m.y - c.y, r, count, 6 * scale);
+  if (ImGui::IsItemActivated()) {
+    menu.pressed = hit;
+    if (hit.zone == MenuZone::Size || hit.zone == MenuZone::Strength) menu.drag = hit.zone;
+  }
+  if (menu.drag != MenuZone::None && ImGui::IsItemActive()) {
+    const bool left = menu.drag == MenuZone::Size;
+    const float v = arcValue(menuAngle(m.x - c.x, m.y - c.y), left);
+    if (left) *size = sizeMin + v * (1 - sizeMin);
+    else *strength = v;
+  }
+  if (ImGui::IsItemDeactivated()) {
+    // A click counts where it started and ended: on a segment it switches or
+    // presses it, beside the ring or in its free middle it closes the menu.
+    if (menu.drag == MenuZone::None && hit.zone == menu.pressed.zone) {
+      if (hit.zone == MenuZone::Segment && hit.segment == menu.pressed.segment && hit.segment < count) {
+        if (bool* t = segments[hit.segment].toggle) *t = !*t;
+        else clicked = hit.segment;
+      } else if (hit.zone == MenuZone::Outside || hit.zone == MenuZone::Center) {
+        menu.open = false;
+      }
+    }
+    menu.drag = MenuZone::None;
+  }
+
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImGuiStyle& st = ImGui::GetStyle();
+  const float band = r.outer - r.inner, mid = (r.inner + r.outer) / 2, line = std::max(1.0f, scale);
+  const ImU32 ink = withAlpha(ImGuiCol_Text, alpha), dim = withAlpha(ImGuiCol_TextDisabled, alpha);
+  const ImU32 border = withAlpha(ImGuiCol_Border, alpha);
+  ImVec4 bgv = st.Colors[ImGuiCol_PopupBg];
+  bgv.w = 0.94f * alpha;
+  dl->AddCircle(c, mid, ImGui::GetColorU32(bgv), 96, band);
+  dl->AddCircle(c, r.outer, border, 96, line);
+  dl->AddCircle(c, r.inner, border, 96, line);
+  const MenuZone over = menu.drag != MenuZone::None ? menu.drag : hit.zone;
+
+  // Title.
+  fillBand(dl, c, r.inner, r.outer, -kMenuTitleHalf, kMenuTitleHalf, withAlpha(ImGuiCol_ButtonActive, alpha));
+  {
+    ImGui::PushFont(nullptr, ImGui::GetFontSize() / st.FontScaleDpi * 1.15f);
+    const ImVec2 ts = ImGui::CalcTextSize(title);
+    const float iconSize = ts.y * 1.3f, w = iconSize + st.ItemInnerSpacing.x + ts.x;
+    const ImVec2 at(c.x - w / 2, c.y - mid);
+    drawIcon(dl, icon, ImVec2(at.x + iconSize / 2, at.y), iconSize, ink, paintColor());
+    dl->AddText(ImVec2(at.x + iconSize + st.ItemInnerSpacing.x, at.y - ts.y / 2), ink, title);
+    ImGui::PopFont();
+  }
+
+  // Size and Strength: a track near the outer edge, filled from the bottom,
+  // with a knob; name and value inside.
+  const float track = r.outer - 20 * scale, thick = 7 * scale;
+  for (const bool left : {true, false}) {
+    const float v = left ? (*size - sizeMin) / (1 - sizeMin) : *strength;
+    const float sign = left ? -1.0f : 1.0f;
+    if (over == (left ? MenuZone::Size : MenuZone::Strength))
+      fillBand(dl, c, r.inner, r.outer, sign * kMenuArcFrom, sign * kMenuArcTo,
+               withAlpha(ImGuiCol_ButtonHovered, alpha * 0.6f));
+    auto stroke = [&](float from, float to, ImU32 color) {
+      dl->PathArcTo(c, track, imAngle(std::min(from, to)), imAngle(std::max(from, to)), 32);
+      dl->PathStroke(color, ImDrawFlags_None, thick);
+    };
+    stroke(sign * kMenuArcFrom, sign * kMenuArcTo, withAlpha(ImGuiCol_FrameBg, alpha));
+    const float at = arcAngle(v, left);
+    if (v > 0) stroke(sign * kMenuArcTo, at, withAlpha(ImGuiCol_SliderGrabActive, alpha));
+    dl->AddCircleFilled(onCircle(c, track, at), thick * 1.3f, ink, 24);
+    char value[16];
+    std::snprintf(value, sizeof value, "%.2f", left ? *size : *strength);
+    const ImVec2 p = onCircle(c, (r.inner + track) / 2 - 4 * scale, sign * 75);
+    const float lh = ImGui::GetTextLineHeight();
+    centeredText(dl, ImVec2(p.x, p.y - lh / 2), dim, left ? "Size" : "Strength");
+    centeredText(dl, ImVec2(p.x, p.y + lh / 2), ink, value);
+  }
+
+  // Segments: name, and a box for switches.
+  for (int i = 0; i < count; ++i) {
+    float from, to;
+    segmentAngles(i, count, from, to);
+    if (over == MenuZone::Segment && hit.segment == i)
+      fillBand(dl, c, r.inner, r.outer, from, to, withAlpha(ImGuiCol_ButtonHovered, alpha * 0.8f));
+    if (i > 0) dl->AddLine(onCircle(c, r.inner, from), onCircle(c, r.outer, from), border, line);
+    const ImVec2 p = onCircle(c, mid, (from + to) / 2);
+    ImGui::PushFont(nullptr, ImGui::GetFontSize() / st.FontScaleDpi * 0.9f);
+    const float lh = ImGui::GetTextLineHeight();
+    if (bool* t = segments[i].toggle) {
+      centeredText(dl, ImVec2(p.x, p.y - lh * 0.6f), ink, segments[i].label);
+      const float b = lh * 0.9f;
+      const ImVec2 b0(p.x - b / 2, p.y + lh * 0.25f), b1(p.x + b / 2, p.y + lh * 0.25f + b);
+      dl->AddRectFilled(b0, b1, withAlpha(*t ? ImGuiCol_CheckMark : ImGuiCol_FrameBg, alpha), st.FrameRounding * 0.6f);
+      if (*t) {
+        const ImVec2 pts[] = {{b0.x + b * 0.22f, b0.y + b * 0.52f}, {b0.x + b * 0.42f, b0.y + b * 0.72f},
+                              {b0.x + b * 0.78f, b0.y + b * 0.3f}};
+        dl->AddPolyline(pts, 3, withAlpha(ImGuiCol_WindowBg, alpha), ImDrawFlags_None, 2 * scale);
+      }
+    } else {
+      centeredText(dl, p, ink, segments[i].label);
+    }
+    ImGui::PopFont();
+  }
+  // The gaps between the sectors.
+  for (const float a : {kMenuTitleHalf, kMenuArcFrom, kMenuArcTo, kMenuBottomFrom}) {
+    for (const float s : {-1.0f, 1.0f})
+      dl->AddLine(onCircle(c, r.inner, s * a), onCircle(c, r.outer, s * a), border, line);
+  }
+  ImGui::End();
+  ImGui::PopStyleVar(2);
+  return clicked;
+}
+
+}  // namespace bh::viewer

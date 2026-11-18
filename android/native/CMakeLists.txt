@@ -17,6 +17,7 @@ add_library(bildhauer_android SHARED
   ${BH_ROOT}/src/app/interaction.cpp
   ${BH_ROOT}/src/app/matcaps.cpp
   ${BH_ROOT}/src/app/icons.cpp
+  ${BH_ROOT}/src/app/brush_menu.cpp
   ${BH_ROOT}/src/app/tool_ring.cpp
   ${BH_ROOT}/src/app/widgets.cpp
   ${BH_ROOT}/src/platform/android/images.cpp

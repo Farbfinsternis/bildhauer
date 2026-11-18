@@ -217,6 +217,67 @@ void toolRingPanel() {
   else app.paint.tool = r.picked == 0 ? PaintTool::Color : r.picked == 1 ? PaintTool::Bump : PaintTool::FlattenBump;
 }
 
+// The brush menu around the pointer (Space): Size, Strength and the switches
+// of the current tool. Prototype beside the brush panel, to compare.
+BrushMenu brushMenuState;
+bool brushMenuShown = false;  // open at the middle of the view, fully faded in (snapshots)
+
+bool viewBusy() { return app.stroke || app.paintStroke || app.orbiting || app.panning; }
+
+void openBrushMenu() {
+  const ImGuiIO& io = ImGui::GetIO();
+  const float s = ImGui::GetStyle().FontScaleDpi, reach = 165 * s + 8 * s;
+  const float x0 = float(app.viewX), y0 = float(app.viewY), x1 = x0 + app.viewW, y1 = y0 + app.viewH;
+  ImVec2 c = ImGui::IsMousePosValid() ? io.MousePos : ImVec2((x0 + x1) / 2, (y0 + y1) / 2);
+  // Fully inside the view where it fits; centered where it does not.
+  c.x = x1 - x0 > 2 * reach ? std::clamp(c.x, x0 + reach, x1 - reach) : (x0 + x1) / 2;
+  c.y = y1 - y0 > 2 * reach ? std::clamp(c.y, y0 + reach, y1 - reach) : (y0 + y1) / 2;
+  brushMenuState = BrushMenu();
+  brushMenuState.open = true;
+  brushMenuState.raise = true;
+  brushMenuState.center = c;
+}
+
+void brushMenuPanel() {
+  if (brushMenuShown && !brushMenuState.open) {
+    openBrushMenu();
+    brushMenuState.alpha = 1;
+  }
+  if (!brushMenuState.open) return;
+  MenuSegment segments[4];
+  int count = 0;
+  if (!app.paintMode) {
+    const Tool tool = app.brush.tool;
+    ToolSliders& s = sliders(tool);
+    if (tool != Tool::Grab && tool != Tool::Rotate && tool != Tool::Scale)
+      segments[count++] = {"Pen pressure", &app.penPressure};
+    switch (tool) {
+      case Tool::Draw: segments[count++] = {"Clay", &app.brush.clay}; segments[count++] = {"Soft", &app.brush.soft}; break;
+      case Tool::Flatten:
+        segments[count++] = {"Lock plane", &app.brush.lockPlane};
+        segments[count++] = {"Angle falloff", &app.brush.angleFalloff};
+        break;
+      case Tool::Mask: segments[count++] = {"Clear mask", nullptr}; break;
+      case Tool::Grab: segments[count++] = {"Global", &app.brush.global}; segments[count++] = {"Limit", &app.brush.limit}; break;
+      case Tool::Rotate: segments[count++] = {"Global", &app.brush.global}; break;
+      case Tool::Scale: segments[count++] = {"Global", &app.brush.global}; segments[count++] = {"XYZ", &app.brush.xyz}; break;
+      default: break;
+    }
+    const int pressed = brushMenu(brushMenuState, toolName(tool), toolIcon(tool), &s.size, 0.02f, &s.strength, segments,
+                                  count, ImGui::GetStyle().FontScaleDpi);
+    if (pressed >= 0 && tool == Tool::Mask) clearMask();
+  } else {
+    const PaintTool tool = app.paint.tool;
+    std::array<float, 3>& ps = paintSliders();
+    segments[count++] = {"Pen pressure", &app.penPressure};
+    segments[count++] = {"Angle falloff", &app.paint.angleFalloff};
+    segments[count++] = {fillLabel(), nullptr};
+    const int pressed = brushMenu(brushMenuState, paintToolName(tool), paintToolIcon(tool), &ps[0], 0.02f, &ps[1],
+                                  segments, count, ImGui::GetStyle().FontScaleDpi);
+    if (pressed == 2) fillLayer(false);
+  }
+}
+
 void penPressureBox() {
   ImGui::Checkbox("Pen pressure", &app.penPressure);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
@@ -580,7 +641,7 @@ std::vector<std::pair<const char*, const char*>> hints() {
       case PaintTool::FlattenBump: h = {{"LMB", "flatten"}}; break;
     }
   }
-  h.insert(h.end(), {{"RMB", "orbit"}, {"MMB", "pan"}, {"Wheel", "zoom"}, {"[ ]", "size"}});
+  h.insert(h.end(), {{"RMB", "orbit"}, {"MMB", "pan"}, {"Wheel", "zoom"}, {"[ ]", "size"}, {"Space", "brush menu"}});
   return h;
 }
 
@@ -842,6 +903,7 @@ void drawUi() {
   }
   viewBar();
   statusBar();
+  brushMenuPanel();
   dialogs();
   ImGui::Render();
   ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
@@ -849,7 +911,29 @@ void drawUi() {
 
 bool uiWantsMouse() { return ImGui::GetIO().WantCaptureMouse; }
 
-bool uiAnimating() { return toolRingState.busy(); }
+bool uiAnimating() { return toolRingState.busy() || (brushMenuState.open && brushMenuState.alpha < 1); }
+
+void brushMenuKey(bool down, bool repeat) {
+  if (down) {
+    if (repeat) return;
+    if (brushMenuState.open) { if (brushMenuState.sticky) brushMenuState.open = false; }
+    else if (!viewBusy()) openBrushMenu();
+  } else if (brushMenuState.open && !brushMenuState.sticky) {
+    // Tapped: it stays open. Held: it closes with the key.
+    if (brushMenuState.held < 0.3f && brushMenuState.drag == MenuZone::None) brushMenuState.sticky = true;
+    else brushMenuState.open = false;
+  }
+}
+
+bool closeBrushMenu() {
+  const bool was = brushMenuState.open;
+  brushMenuState.open = false;
+  return was;
+}
+
+bool brushMenuOpen() { return brushMenuState.open; }
+
+void showBrushMenu() { brushMenuShown = true; }
 
 void showToolRingAt(float progress) { toolRingShown = progress; }
 

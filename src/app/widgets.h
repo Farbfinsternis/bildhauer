@@ -70,3 +70,33 @@ RingResult toolRing(RingState& state, const RingSettings& settings, const RingTo
                     const RingPlace& place);
 
 }  // namespace bh::viewer
+
+#include "app/brush_menu.h"
+
+namespace bh::viewer {
+
+// One segment at the bottom of the brush menu: a switch, or a button when
+// `toggle` is null.
+struct MenuSegment {
+  const char* label;
+  bool* toggle;
+};
+
+struct BrushMenu {
+  bool open = false;
+  bool sticky = false;  // Space was only tapped: stays open until a click beside it or Space
+  bool raise = false;   // bring the window to the front on the next frame
+  ImVec2 center;
+  float alpha = 0;      // fades in
+  float held = 0;       // s since it opened
+  MenuZone drag = MenuZone::None;
+  MenuHit pressed;      // where the current click started
+};
+
+// Draws the open brush menu (brush_menu.h) around `menu.center` and takes
+// its clicks; a click beside it closes it. `size` runs from `sizeMin` to 1,
+// `strength` from 0 to 1. Returns the index of a button segment clicked.
+int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float sizeMin, float* strength,
+              const MenuSegment* segments, int count, float scale);
+
+}  // namespace bh::viewer

@@ -28,6 +28,14 @@ bool uiWantsMouse();     // the pointer is over the UI or a widget is held
 bool uiWantsKeyboard();  // a text field has the keyboard
 // The UI needs more frames without input (the tool ring rolling or waiting).
 bool uiAnimating();
+// The brush menu around the pointer: Space down opens it; Space up closes it
+// again when held, a short tap keeps it open until Space or a click beside it.
+void brushMenuKey(bool down, bool repeat);
+// Closes it (Escape); true if it was open.
+bool closeBrushMenu();
+bool brushMenuOpen();
+// Shows the brush menu open, for snapshots.
+void showBrushMenu();
 // Holds the tool ring at a progress between closed (0) and open (1), for snapshots.
 void showToolRingAt(float progress);
 

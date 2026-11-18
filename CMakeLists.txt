@@ -68,6 +68,7 @@ if(WIN32)
     src/app/matcaps.cpp
     src/app/render.cpp
     src/app/snapshot.cpp
+    src/app/brush_menu.cpp
     src/app/settings.cpp
     src/app/tool_ring.cpp
     src/app/ui.cpp
@@ -118,6 +119,9 @@ add_test(NAME gpu_mesh COMMAND gpu_mesh_test)
 add_executable(tool_ring_test tests/tool_ring_test.cpp src/app/tool_ring.cpp)
 target_include_directories(tool_ring_test PRIVATE src)
 add_test(NAME tool_ring COMMAND tool_ring_test)
+add_executable(brush_menu_test tests/brush_menu_test.cpp src/app/brush_menu.cpp)
+target_include_directories(brush_menu_test PRIVATE src)
+add_test(NAME brush_menu COMMAND brush_menu_test)
 add_executable(mesh_tree_test tests/mesh_tree_test.cpp)
 target_link_libraries(mesh_tree_test PRIVATE bildhauer_core)
 add_test(NAME mesh_tree COMMAND mesh_tree_test)
