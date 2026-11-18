@@ -34,8 +34,8 @@ void brushMenuKey(bool down, bool repeat);
 // Closes it (Escape); true if it was open.
 bool closeBrushMenu();
 bool brushMenuOpen();
-// Shows the brush menu open, for snapshots.
-void showBrushMenu();
+// Shows the brush menu open, with segment `flyout`'s panel (-1: none), for snapshots.
+void showBrushMenu(int flyout = -1);
 // Holds the tool ring at a progress between closed (0) and open (1), for snapshots.
 void showToolRingAt(float progress);
 

@@ -399,9 +399,12 @@ void centeredText(ImDrawList* dl, ImVec2 at, ImU32 color, const char* text) {
 }  // namespace
 
 int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float sizeMin, float* strength,
-              const MenuSegment* segments, int count, float scale) {
+              const MenuSegment* segments, int count, float scale, void (*flyout)(int segment)) {
   if (!menu.open) return -1;
+  // The tool may have changed under an open panel (keys).
+  if (menu.flyout >= count || (menu.flyout >= 0 && !segments[menu.flyout].flyout)) menu.flyout = -1;
   const ImGuiIO& io = ImGui::GetIO();
+  const ImVec2 padding = ImGui::GetStyle().WindowPadding;
   menu.alpha = std::min(1.0f, menu.alpha + io.DeltaTime / 0.1f);
   menu.held += io.DeltaTime;
   const float alpha = menu.alpha;
@@ -429,6 +432,9 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
   const MenuHit hit = menuHit(m.x - c.x, m.y - c.y, r, count, 6 * scale);
   if (ImGui::IsItemActivated()) {
     menu.pressed = hit;
+    // Using anything else on the ring closes an open panel; a segment with a
+    // panel switches to its own on release.
+    if (hit.zone != MenuZone::Segment || hit.segment >= count || !segments[hit.segment].flyout) menu.flyout = -1;
     if (hit.zone == MenuZone::Size || hit.zone == MenuZone::Strength) menu.drag = hit.zone;
   }
   if (menu.drag != MenuZone::None && ImGui::IsItemActive()) {
@@ -442,8 +448,17 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
     // presses it, beside the ring or in its free middle it closes the menu.
     if (menu.drag == MenuZone::None && hit.zone == menu.pressed.zone) {
       if (hit.zone == MenuZone::Segment && hit.segment == menu.pressed.segment && hit.segment < count) {
-        if (bool* t = segments[hit.segment].toggle) *t = !*t;
-        else clicked = hit.segment;
+        const MenuSegment& s = segments[hit.segment];
+        if (s.flyout) {
+          // Its panel opens beside the ring (a second click closes it); from
+          // now on the menu stays open when Space is released.
+          menu.flyout = menu.flyout == hit.segment ? -1 : hit.segment;
+          menu.sticky = true;
+        } else if (s.toggle) {
+          *s.toggle = !*s.toggle;
+        } else {
+          clicked = hit.segment;
+        }
       } else if (hit.zone == MenuZone::Outside || hit.zone == MenuZone::Center) {
         menu.open = false;
       }
@@ -504,13 +519,34 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
   for (int i = 0; i < count; ++i) {
     float from, to;
     segmentAngles(i, count, from, to);
-    if (over == MenuZone::Segment && hit.segment == i)
+    const MenuSegment& seg = segments[i];
+    if (menu.flyout == i)
+      fillBand(dl, c, r.inner, r.outer, from, to, withAlpha(ImGuiCol_ButtonActive, alpha * 0.7f));
+    else if (over == MenuZone::Segment && hit.segment == i)
       fillBand(dl, c, r.inner, r.outer, from, to, withAlpha(ImGuiCol_ButtonHovered, alpha * 0.8f));
     if (i > 0) dl->AddLine(onCircle(c, r.inner, from), onCircle(c, r.outer, from), border, line);
     const ImVec2 p = onCircle(c, mid, (from + to) / 2);
     ImGui::PushFont(nullptr, ImGui::GetFontSize() / st.FontScaleDpi * 0.9f);
     const float lh = ImGui::GetTextLineHeight();
-    if (bool* t = segments[i].toggle) {
+    if (seg.flyout) {
+      // The name, under it the colors or a small arrow toward the panel.
+      centeredText(dl, ImVec2(p.x, p.y - lh * 0.6f), ink, seg.label);
+      const float b = lh * 0.9f, y = p.y + lh * 0.25f;
+      if (seg.swatches > 0) {
+        const float w = seg.swatches * b + (seg.swatches - 1) * b * 0.3f;
+        for (int k = 0; k < seg.swatches; ++k) {
+          const float x = p.x - w / 2 + k * b * 1.3f;
+          ImU32 col = seg.colors[k];
+          col = (col & 0x00FFFFFF) | (ImU32(((col >> 24) & 0xFF) * alpha) << 24);
+          dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), col, st.FrameRounding * 0.6f);
+          dl->AddRect(ImVec2(x, y), ImVec2(x + b, y + b), border, st.FrameRounding * 0.6f, 0, line);
+        }
+      } else {
+        const float h = b * 0.45f, cy = y + b / 2;
+        dl->AddTriangleFilled(ImVec2(p.x - h * 0.6f, cy - h), ImVec2(p.x - h * 0.6f, cy + h), ImVec2(p.x + h, cy),
+                              menu.flyout == i ? ink : dim);
+      }
+    } else if (bool* t = seg.toggle) {
       centeredText(dl, ImVec2(p.x, p.y - lh * 0.6f), ink, segments[i].label);
       const float b = lh * 0.9f;
       const ImVec2 b0(p.x - b / 2, p.y + lh * 0.25f), b1(p.x + b / 2, p.y + lh * 0.25f + b);
@@ -529,6 +565,30 @@ int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float 
   for (const float a : {kMenuTitleHalf, kMenuArcFrom, kMenuArcTo, kMenuBottomFrom}) {
     for (const float s : {-1.0f, 1.0f})
       dl->AddLine(onCircle(c, r.inner, s * a), onCircle(c, r.outer, s * a), border, line);
+  }
+
+  // The open segment's panel beside the ring, on the side with room. A child
+  // of the menu window, so it lies above the area that closes the menu.
+  if (menu.flyout >= 0 && flyout) {
+    const float width = 280 * scale, gap = 10 * scale;
+    float x = c.x + r.outer + gap;
+    if (x + width > vp->Pos.x + vp->Size.x - gap) x = c.x - r.outer - gap - width;
+    const float h = menu.flyoutHeight > 0 ? menu.flyoutHeight : 200 * scale;
+    const float y = std::clamp(c.y - h / 2, vp->Pos.y + gap, std::max(vp->Pos.y + gap, vp->Pos.y + vp->Size.y - h - gap));
+    ImGui::SetCursorScreenPos(ImVec2(x, y));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, padding);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, st.FrameRounding * 2);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, st.Colors[ImGuiCol_PopupBg]);
+    ImGui::BeginChild("##flyout", ImVec2(width, 0),
+                      ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.62f);
+    ImGui::SeparatorText(segments[menu.flyout].label);
+    flyout(menu.flyout);
+    ImGui::PopItemWidth();
+    ImGui::EndChild();
+    menu.flyoutHeight = ImGui::GetItemRectSize().y;
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
   }
   ImGui::End();
   ImGui::PopStyleVar(2);

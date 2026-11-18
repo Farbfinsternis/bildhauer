@@ -177,6 +177,8 @@ void menuBar() {
 }
 
 void sculptMaskPanel();
+void stampPanel();
+void heightmaskPanel();
 
 // The tools of the current mode in the tool ring at the left edge of the view.
 RingState toolRingState;
@@ -221,6 +223,7 @@ void toolRingPanel() {
 // of the current tool. Prototype beside the brush panel, to compare.
 BrushMenu brushMenuState;
 bool brushMenuShown = false;  // open at the middle of the view, fully faded in (snapshots)
+int brushMenuShownFlyout = -1;  // with it, this segment's panel open
 
 bool viewBusy() { return app.stroke || app.paintStroke || app.orbiting || app.panning; }
 
@@ -242,39 +245,78 @@ void brushMenuPanel() {
   if (brushMenuShown && !brushMenuState.open) {
     openBrushMenu();
     brushMenuState.alpha = 1;
+    brushMenuState.flyout = brushMenuShownFlyout;
   }
   if (!brushMenuState.open) return;
   MenuSegment segments[4];
   int count = 0;
+  // What each flyout segment's panel holds: the brush panel's sections.
+  static void (*content[4])() = {};
+  auto toggle = [&](const char* label, bool* value) {
+    segments[count].label = label;
+    segments[count].toggle = value;
+    content[count++] = nullptr;
+  };
+  auto panel = [&](const char* label, void (*draw)()) -> MenuSegment& {
+    segments[count].label = label;
+    segments[count].flyout = true;
+    content[count] = draw;
+    return segments[count++];
+  };
+  auto showFlyout = [](int segment) {
+    if (content[segment]) content[segment]();
+  };
+  const float scale = ImGui::GetStyle().FontScaleDpi;
   if (!app.paintMode) {
     const Tool tool = app.brush.tool;
     ToolSliders& s = sliders(tool);
-    if (tool != Tool::Grab && tool != Tool::Rotate && tool != Tool::Scale)
-      segments[count++] = {"Pen pressure", &app.penPressure};
+    if (tool != Tool::Grab && tool != Tool::Rotate && tool != Tool::Scale) toggle("Pen pressure", &app.penPressure);
     switch (tool) {
-      case Tool::Draw: segments[count++] = {"Clay", &app.brush.clay}; segments[count++] = {"Soft", &app.brush.soft}; break;
-      case Tool::Flatten:
-        segments[count++] = {"Lock plane", &app.brush.lockPlane};
-        segments[count++] = {"Angle falloff", &app.brush.angleFalloff};
-        break;
-      case Tool::Mask: segments[count++] = {"Clear mask", nullptr}; break;
-      case Tool::Grab: segments[count++] = {"Global", &app.brush.global}; segments[count++] = {"Limit", &app.brush.limit}; break;
-      case Tool::Rotate: segments[count++] = {"Global", &app.brush.global}; break;
-      case Tool::Scale: segments[count++] = {"Global", &app.brush.global}; segments[count++] = {"XYZ", &app.brush.xyz}; break;
+      case Tool::Draw: toggle("Clay", &app.brush.clay); toggle("Soft", &app.brush.soft); break;
+      case Tool::Flatten: toggle("Lock plane", &app.brush.lockPlane); toggle("Angle falloff", &app.brush.angleFalloff); break;
+      case Tool::Mask: toggle("Clear mask", nullptr); break;
+      case Tool::Grab: toggle("Global", &app.brush.global); toggle("Limit", &app.brush.limit); break;
+      case Tool::Rotate: toggle("Global", &app.brush.global); break;
+      case Tool::Scale: toggle("Global", &app.brush.global); toggle("XYZ", &app.brush.xyz); break;
       default: break;
     }
+    // Only these three use the brush mask (brushes.md 3.4).
+    if (tool == Tool::Draw || tool == Tool::Smooth || tool == Tool::Flatten)
+      panel(sculptMaskActive() ? "Mask (on)" : "Brush mask", sculptMaskPanel);
     const int pressed = brushMenu(brushMenuState, toolName(tool), toolIcon(tool), &s.size, 0.02f, &s.strength, segments,
-                                  count, ImGui::GetStyle().FontScaleDpi);
+                                  count, scale, showFlyout);
     if (pressed >= 0 && tool == Tool::Mask) clearMask();
   } else {
     const PaintTool tool = app.paint.tool;
     std::array<float, 3>& ps = paintSliders();
-    segments[count++] = {"Pen pressure", &app.penPressure};
-    segments[count++] = {"Angle falloff", &app.paint.angleFalloff};
-    segments[count++] = {fillLabel(), nullptr};
-    const int pressed = brushMenu(brushMenuState, paintToolName(tool), paintToolIcon(tool), &ps[0], 0.02f, &ps[1],
-                                  segments, count, ImGui::GetStyle().FontScaleDpi);
-    if (pressed == 2) fillLayer(false);
+    toggle("Pen pressure", &app.penPressure);
+    MenuSegment& colors = panel("Colors", [] {
+      colorEdit("Primary", app.paint.primary);
+      ImGui::SameLine();
+      colorEdit("Secondary", app.paint.secondary);
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Swap")) std::swap(app.paint.primary, app.paint.secondary);
+    });
+    colors.swatches = 2;
+    colors.colors[0] = app.paint.primary | 0xFF000000u;
+    colors.colors[1] = app.paint.secondary | 0xFF000000u;
+    panel("Brush", [] {
+      slider("Hardness", paintSliders()[2]);
+      ImGui::Checkbox("Surface angle falloff", &app.paint.angleFalloff);
+      char fill[64];
+      std::snprintf(fill, sizeof fill, "%s (Ctrl+F)", fillLabel());
+      if (ImGui::Button(fill, ImVec2(-1, 0))) fillLayer(ImGui::GetIO().KeyShift);
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("The whole layer at once, as far as Strength says.\n"
+                          "With Shift: the secondary color, or an empty mask.");
+    });
+    panel(stampsActive() || app.paint.heightmask ? "Stamp (on)" : "Stamp", [] {
+      stampPanel();
+      ImGui::SeparatorText("Heightmask");
+      heightmaskPanel();
+    });
+    brushMenu(brushMenuState, paintToolName(tool), paintToolIcon(tool), &ps[0], 0.02f, &ps[1], segments, count, scale,
+              showFlyout);
   }
 }
 
@@ -933,7 +975,10 @@ bool closeBrushMenu() {
 
 bool brushMenuOpen() { return brushMenuState.open; }
 
-void showBrushMenu() { brushMenuShown = true; }
+void showBrushMenu(int flyout) {
+  brushMenuShown = true;
+  brushMenuShownFlyout = flyout;
+}
 
 void showToolRingAt(float progress) { toolRingShown = progress; }
 

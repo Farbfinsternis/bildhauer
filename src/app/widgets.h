@@ -75,11 +75,15 @@ RingResult toolRing(RingState& state, const RingSettings& settings, const RingTo
 
 namespace bh::viewer {
 
-// One segment at the bottom of the brush menu: a switch, or a button when
-// `toggle` is null.
+// One segment at the bottom of the brush menu: a switch (`toggle`), a button,
+// or with `flyout` a panel that opens beside the ring (the second level).
+// `swatches` > 0 shows that many colors from `colors` in place of the box.
 struct MenuSegment {
   const char* label;
-  bool* toggle;
+  bool* toggle = nullptr;
+  bool flyout = false;
+  int swatches = 0;
+  ImU32 colors[2] = {};
 };
 
 struct BrushMenu {
@@ -91,12 +95,16 @@ struct BrushMenu {
   float held = 0;       // s since it opened
   MenuZone drag = MenuZone::None;
   MenuHit pressed;      // where the current click started
+  int flyout = -1;      // the segment whose panel is open
+  float flyoutHeight = 0;  // of that panel last frame, to keep it on screen
 };
 
 // Draws the open brush menu (brush_menu.h) around `menu.center` and takes
 // its clicks; a click beside it closes it. `size` runs from `sizeMin` to 1,
-// `strength` from 0 to 1. Returns the index of a button segment clicked.
+// `strength` from 0 to 1. A flyout segment's panel is drawn by
+// `flyout(segment)` with ordinary ImGui widgets. Returns the index of a
+// button segment clicked.
 int brushMenu(BrushMenu& menu, const char* title, Icon icon, float* size, float sizeMin, float* strength,
-              const MenuSegment* segments, int count, float scale);
+              const MenuSegment* segments, int count, float scale, void (*flyout)(int segment) = nullptr);
 
 }  // namespace bh::viewer
